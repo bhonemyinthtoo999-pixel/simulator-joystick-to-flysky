@@ -40,7 +40,7 @@ No third-party Arduino library is required.
 ## Desktop connection
 
 1. Start the desktop app.
-2. Select the Arduino COM port under **ESP32-S3 / Firmware**. The page name is shared by all hardware targets.
+2. Select the Arduino COM port under **Adapter / Firmware**.
 3. Use `115200` baud and click **Connect serial**.
 4. Wait about two seconds after connecting because opening the serial port resets an UNO/Nano.
 5. Click **Handshake** when needed.
