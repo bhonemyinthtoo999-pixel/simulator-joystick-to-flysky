@@ -32,10 +32,11 @@ class DevicePage(QWidget):
         super().__init__()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 20)
-        outer.addWidget(page_title("ESP32-S3 Device & Firmware"))
+        outer.addWidget(page_title("Adapter & Firmware"))
         help_text = QLabel(
-            "Use a real serial port later, or connect the built-in ESP32-S3 simulator now to test handshake, "
-            "profile upload, live channels and diagnostics without hardware."
+            "Connect an ESP32-S3 adapter or Arduino UNO/Nano bridge through a real serial port, "
+            "or use the built-in ESP32-S3 simulator for no-hardware testing. Arduino bridge mode "
+            "streams final channel values from the desktop and does not require profile upload."
         )
         help_text.setWordWrap(True)
         outer.addWidget(help_text)
@@ -49,7 +50,7 @@ class DevicePage(QWidget):
         self.baud_combo.setCurrentText("115200")
         refresh = QPushButton("Refresh")
         connect = QPushButton("Connect serial")
-        simulator = QPushButton("Connect simulator")
+        simulator = QPushButton("Connect ESP32 simulator")
         disconnect = QPushButton("Disconnect")
         refresh.clicked.connect(self.refresh_requested.emit)
         connect.clicked.connect(lambda: self.connect_requested.emit(self.port_combo.currentData() or "", int(self.baud_combo.currentData())))
@@ -67,7 +68,7 @@ class DevicePage(QWidget):
         action_row = QHBoxLayout()
         for text, callback in (
             ("Handshake", self.hello_requested.emit),
-            ("Validate & upload active profile", self.upload_requested.emit),
+            ("Validate & upload ESP32 profile", self.upload_requested.emit),
             ("Reboot", self.reboot_requested.emit),
             ("Enter bootloader", self.bootloader_requested.emit),
         ):
