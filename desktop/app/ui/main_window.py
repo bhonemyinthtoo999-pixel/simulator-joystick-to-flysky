@@ -68,7 +68,7 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
             "Channel Mapping",
             "Calibration",
             "Profiles",
-            "ESP32-S3 / Firmware",
+            "Adapter / Firmware",
             "Diagnostics",
             "Settings",
         ):
