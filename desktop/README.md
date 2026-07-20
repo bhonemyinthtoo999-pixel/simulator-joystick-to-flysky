@@ -1,6 +1,6 @@
 # Desktop Application
 
-The desktop application is the configuration, calibration and diagnostics tool for Simulator Joystick to FlySky. It also provides a complete no-hardware demo mode.
+The desktop application is the configuration, calibration and diagnostics tool for Simulator Joystick to FlySky. It also provides a complete no-hardware demo mode and can stream final RC channels to an Arduino UNO/Nano bridge.
 
 ## Requirements
 
@@ -29,9 +29,21 @@ The command prompt must show that the current directory ends in `simulator-joyst
 3. Open **Calibration** and exercise the full calibration workflow.
 4. Open **Channel Mapping** to edit RC channels and see live `1000–2000 µs` output.
 5. Open **Profiles** to create, duplicate, activate, import and export profiles.
-6. Open **ESP32-S3 / Firmware** and click **Connect built-in simulator**.
-7. Click **Handshake**, then **Upload active profile**.
+6. Open **Adapter / Firmware** and click **Connect ESP32 simulator**.
+7. Click **Handshake**, then **Validate & upload ESP32 profile**.
 8. Open **Diagnostics** to inspect protocol and transport statistics.
+
+## Arduino UNO/Nano bridge
+
+1. Upload `firmware/arduino-uno/simjoy_arduino_bridge/simjoy_arduino_bridge.ino` using Arduino IDE.
+2. Close Arduino Serial Monitor so the COM port is free.
+3. Open **Adapter / Firmware** in the desktop app.
+4. Select the Arduino COM port and `115200` baud.
+5. Click **Connect serial** and wait about two seconds because opening the port resets an UNO/Nano.
+6. Click **Handshake** if the board information has not appeared automatically.
+7. Keep the desktop application running while using the joystick.
+
+The Arduino bridge receives final `LIVE_CHANNELS` values. Calibration, mapping and profiles stay on the PC, so **Validate & upload ESP32 profile** is not required for Arduino operation.
 
 ## Physical joystick support
 
