@@ -1,0 +1,26 @@
+name: Arduino firmware build
+
+on:
+  push:
+    paths:
+      - "firmware/arduino-uno/**"
+      - ".github/workflows/arduino-build.yml"
+  pull_request:
+    paths:
+      - "firmware/arduino-uno/**"
+
+jobs:
+  compile-uno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install AVR core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+      - name: Compile Arduino UNO bridge
+        run: |
+          arduino-cli compile \
+            --fqbn arduino:avr:uno \
+            firmware/arduino-uno/simjoy_arduino_bridge
