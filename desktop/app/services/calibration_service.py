@@ -69,6 +69,8 @@ class CalibrationSession:
                 minimum = -1.0
             if maximum == float("-inf"):
                 maximum = 1.0
+            if maximum - minimum < 0.05:
+                minimum, maximum = -1.0, 1.0
             center = max(minimum, min(maximum, self.center[index]))
             result.append(AxisCalibration(minimum=minimum, center=center, maximum=maximum))
         return result
@@ -86,14 +88,14 @@ class CalibrationStore:
             return {
                 guid: [AxisCalibration(**axis) for axis in axes]
                 for guid, axes in payload.items()
+                if isinstance(axes, list)
             }
         except (OSError, ValueError, TypeError):
             return {}
 
     def save(self, data: dict[str, list[AxisCalibration]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            guid: [asdict(axis) for axis in axes]
-            for guid, axes in data.items()
-        }
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        payload = {guid: [asdict(axis) for axis in axes] for guid, axes in data.items()}
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary.replace(self.path)

@@ -1,0 +1,32 @@
+menu "Simulator Joystick to FlySky"
+
+config SIMJOY_PPM_GPIO
+    int "PPM output GPIO"
+    range 0 48
+    default 4
+
+config SIMJOY_PROTOCOL_UART
+    int "Desktop protocol UART number"
+    range 0 2
+    default 1
+
+config SIMJOY_PROTOCOL_TX_GPIO
+    int "Desktop protocol UART TX GPIO"
+    range 0 48
+    default 17
+
+config SIMJOY_PROTOCOL_RX_GPIO
+    int "Desktop protocol UART RX GPIO"
+    range 0 48
+    default 18
+
+config SIMJOY_PROTOCOL_BAUD
+    int "Desktop protocol baud rate"
+    default 115200
+
+config SIMJOY_USB_TASK_CORE
+    int "USB task core (-1 for no affinity)"
+    range -1 1
+    default 0
+
+endmenu

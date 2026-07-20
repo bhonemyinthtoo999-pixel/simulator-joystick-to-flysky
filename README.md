@@ -1,86 +1,75 @@
 # Simulator Joystick to FlySky
 
-Universal USB simulator joystick adapter for the FlySky FS-i6/FS-i6X trainer port.
+Open-source hardware and software for using a USB simulator joystick as a student/trainer control source for a FlySky transmitter.
 
-> Project status: early development. Hardware and firmware are not yet flight-tested as a complete standalone system.
-
-## Goal
-
-Build a plug-and-play adapter that lets a compatible USB simulator joystick control a FlySky transmitter through its trainer/student input.
+## Target architecture
 
 ```text
-USB Simulator Joystick
-        ↓
-ESP32-S3 USB Host
-        ↓
-Calibration + Channel Mapping + Safety
-        ↓
-FlySky-compatible PPM
-        ↓
-FlySky Trainer/Student Port
+USB simulator joystick
+        │ USB HID
+        ▼
+ESP32-S3 USB Host adapter ── PPM ──► FlySky trainer/student port
+        ▲
+        │ optional UART configuration and diagnostics
+        ▼
+Windows desktop application
 ```
 
-The planned desktop application will configure, calibrate, diagnose, and update the adapter. The final adapter itself is intended to work without a PC after configuration.
+The FlySky transmitter remains the radio link and retains its trainer switch, mixes, model settings and safety behavior.
 
-## Planned features
+## Current MVP
 
-- USB HID joystick detection
-- PXN 2119 Pro support as the first tested device
-- Configurable axis and button mapping
-- Per-channel minimum, center, maximum, reverse, trim, expo, and dual rate
-- Multiple aircraft profiles
-- Live joystick and RC channel monitor
-- Safe startup, disconnect failsafe, watchdog, and emergency disarm
-- FlySky-compatible six-channel negative-polarity PPM output
-- ESP32-S3 firmware update from the desktop application
-- Windows desktop application first, with Linux and macOS considered later
+### Desktop application
 
-## Repository structure
+- Generic SDL/DirectInput joystick discovery and hot-plug monitoring
+- Built-in Demo Flight Joystick for testing with no hardware
+- Live axes, buttons and hat-switch monitor
+- Calibration capture and persistent per-GUID calibration
+- 4–16 channel mapping with endpoints, reverse, trim, expo, smoothing and failsafe
+- Profile create, duplicate, import, export, activate and persistence
+- Versioned CRC-protected desktop/device protocol
+- Real serial connection and built-in ESP32-S3 simulator
+- Diagnostics export and Windows executable build script
 
-```text
-.
-├── desktop/              Desktop configuration application
-├── firmware/esp32-s3/    Standalone ESP32-S3 firmware
-├── hardware/             Wiring, schematic, PCB, and enclosure files
-├── docs/                 Architecture, protocol, roadmap, and safety notes
-├── examples/             Test data and reference examples
-├── assets/               Images and project artwork
-├── AGENTS.md             Development rules for AI coding agents
-└── README.md
+### ESP32-S3 firmware
+
+- ESP-IDF USB Host HID driver integration
+- Generic HID report descriptor parser for axes, buttons and hats
+- Standalone channel mapping and NVS profile storage
+- RMT-based configurable PPM output
+- UART desktop protocol for profile upload, status, diagnostics and bounded live-channel testing
+- Input timeout and per-channel failsafe behavior
+
+## Test now without a joystick
+
+```bat
+cd desktop
+py -3 -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python -m app.main
 ```
 
-## Current validated information
+Demo Controller is enabled by default. Open **ESP32-S3 / Firmware** and choose **Connect built-in simulator** to test the full desktop workflow without physical hardware.
 
-The earlier Arduino/Python prototype confirmed the target FlySky trainer signal characteristics used by this project:
+## Firmware build
 
-- Student-input trainer architecture
-- Negative-polarity PPM
-- Idle HIGH
-- Approximately 400 µs LOW separator pulse
-- Approximately 21 ms frame
-- Six channels
+```bash
+cd firmware/esp32-s3
+idf.py set-target esp32s3
+idf.py build
+idf.py -p COM_PORT flash monitor
+```
 
-These values must be verified again with the ESP32-S3 standalone hardware before any flight test.
+Firmware compilation and desktop tests can be performed now. Real USB-host compatibility, PPM polarity, trainer-port wiring and flight behavior must be validated with the actual ESP32-S3 board, joystick and FlySky transmitter before use on an aircraft.
 
-## Development phases
+## Safety
 
-1. **Foundation** — documentation, protocol, repository structure, and safety rules.
-2. **Desktop MVP** — device discovery, joystick monitor, channel monitor, calibration, and profiles.
-3. **ESP32-S3 MVP** — USB Host, HID parsing, configuration storage, and PPM generation.
-4. **Integration** — desktop-to-device protocol, diagnostics, firmware update, and failsafe testing.
-5. **Hardware** — protected USB power path, trainer connector, PCB, and enclosure.
-6. **Flight validation** — bench test first, propeller removed, then controlled ground and flight tests.
+- Test first with no propeller or motor power.
+- Confirm channel order, endpoints, direction and throttle failsafe.
+- Do not connect an unknown trainer-port voltage directly to ESP32-S3 GPIO.
+- Use a common ground and an appropriate signal-conditioning circuit.
+- The adapter does not replace the transmitter or receiver failsafe configuration.
 
-## Safety warning
-
-This project can command a real RC aircraft. Incorrect mapping, polarity, timing, power wiring, or failsafe behavior can cause injury or property damage.
-
-- Never perform initial tests with a propeller installed.
-- Keep the FlySky transmitter as the master controller.
-- Verify every channel direction and endpoint before enabling trainer mode.
-- Test joystick disconnect, ESP32 reset, power loss, and invalid configuration behavior.
-- Do not fly until the complete signal path has passed repeatable bench tests.
-
-## License
-
-This project is released under the MIT License. See `LICENSE`.
+See [desktop/README.md](desktop/README.md), [firmware/esp32-s3/README.md](firmware/esp32-s3/README.md), [hardware/README.md](hardware/README.md) and [docs/protocol.md](docs/protocol.md).

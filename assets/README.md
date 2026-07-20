@@ -1,5 +1,3 @@
 # Assets
 
-Project artwork, screenshots, diagrams, and documentation images belong here.
-
-Keep source files where practical and record the license or origin of third-party assets before committing them.
+Project screenshots, wiring diagrams, logic-analyzer captures and release artwork belong here. Hardware diagrams must identify board revision, connector pin numbering and measured voltage levels.

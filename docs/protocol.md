@@ -1,47 +1,64 @@
-# Desktop–Device Protocol
+# Desktop–Device Protocol v1.0
 
-## Status
+## Transport
 
-Draft for the initial USB serial implementation. No field layout is frozen yet.
+The initial hardware transport is a 3.3 V UART exposed to Windows through a USB-to-TTL adapter. Default settings are `115200 8N1`.
 
-## Design goals
+## Frame format
 
-- Versioned and backward-compatible where practical.
-- Easy to inspect during development.
-- Strict length and value validation.
-- Explicit request, response, acknowledgement, and error messages.
-- Safe handling of interrupted profile uploads.
-- No command may bypass firmware safety checks.
+All integer fields are little-endian.
 
-## Initial transport
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 2 | Magic bytes `S`, `J` |
+| 2 | 1 | Protocol major version |
+| 3 | 1 | Message type |
+| 4 | 2 | Sequence number |
+| 6 | 2 | UTF-8 JSON payload length |
+| 8 | N | JSON object payload |
+| 8+N | 2 | CRC16-CCITT over bytes from major version through payload |
 
-The first implementation will use USB CDC serial between the desktop application and ESP32-S3. HID joystick input and FlySky PPM output remain independent of this configuration link.
+CRC parameters:
 
-## Planned message groups
+- Polynomial: `0x1021`
+- Initial value: `0xFFFF`
+- No reflection
+- No final XOR
 
-- `HELLO`: protocol and firmware version negotiation.
-- `DEVICE_INFO`: board, firmware, hardware revision, and capabilities.
-- `STATUS`: joystick, PPM, profile, power, and fault status.
-- `LIVE_INPUT`: raw and normalized joystick state.
-- `LIVE_CHANNELS`: final RC channel values.
-- `PROFILE_LIST`: stored profiles and active profile.
-- `PROFILE_READ`: retrieve one profile.
-- `PROFILE_VALIDATE`: validate without saving.
-- `PROFILE_WRITE`: staged profile upload.
-- `PROFILE_ACTIVATE`: atomically activate a validated profile.
-- `CALIBRATION`: start, sample, complete, or cancel calibration.
-- `REBOOT`: controlled reboot with acknowledgement.
-- `BOOTLOADER`: enter supported firmware-update mode.
-- `ERROR`: structured error code and diagnostic message.
+Maximum payload: 8192 bytes.
 
-## Safety behavior
+## Message types
 
-- Invalid, incomplete, oversized, or unsupported messages are rejected.
-- Profile writes are staged and verified before replacing the active profile.
-- Loss of desktop communication does not disable valid standalone operation.
-- Desktop commands cannot directly set unrestricted live PPM values in a release build.
-- Firmware applies channel clamps and failsafe policy after all configuration input.
+| ID | Name | Direction |
+|---:|---|---|
+| 1 | `HELLO` | Desktop → device |
+| 2 | `HELLO_RESPONSE` | Device → desktop |
+| 3 | `DEVICE_INFO` | Both |
+| 4 | `STATUS` | Both |
+| 5 | `LIVE_INPUT` | Device → desktop, reserved |
+| 6 | `LIVE_CHANNELS` | Desktop → device |
+| 7 | `PROFILE_LIST` | Reserved |
+| 8 | `PROFILE_READ` | Reserved |
+| 9 | `PROFILE_VALIDATE` | Desktop → device |
+| 10 | `PROFILE_WRITE` | Desktop → device |
+| 11 | `PROFILE_ACTIVATE` | Desktop → device |
+| 12 | `CALIBRATION` | Reserved |
+| 13 | `REBOOT` | Desktop → device |
+| 14 | `BOOTLOADER` | Desktop → device; may return unsupported |
+| 15 | `ACK` | Device → desktop |
+| 16 | `ERROR` | Device → desktop |
+| 17 | `LOG` | Device → desktop |
 
-## Versioning
+## Safety rules
 
-Every session must negotiate a protocol major and minor version. A major-version mismatch blocks configuration writes but may still allow basic device identification.
+- Invalid magic, length, version, JSON or CRC is discarded.
+- Profile data is validated before NVS replacement.
+- All channel values are clamped to `800–2200 µs`.
+- `LIVE_CHANNELS` expires after 500 ms; the firmware then returns to standalone HID mapping or failsafe.
+- Joystick input expires according to `failsafe_timeout_ms` in the active profile.
+- Profile validation does not modify the active profile.
+- Firmware profile mapping and PPM timing remain bounded even when desktop data is malformed.
+
+## Compatibility
+
+A protocol-major mismatch blocks normal command processing. Minor-version additions should preserve existing field meanings and make new JSON fields optional where practical.
