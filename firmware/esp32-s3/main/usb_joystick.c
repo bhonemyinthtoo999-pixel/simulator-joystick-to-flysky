@@ -5,10 +5,10 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "freertosa/FreeRTOS.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "freertosa/semphr.h"
-#include "freertosa/task.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "usb/hid_host.h"
 #include "usb/usb_host.h"
 
