@@ -12,13 +12,16 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
+    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from ..services.calibration_service import CalibrationSession, CalibrationStore
 from ..services.joystick_service import JoystickInfo, JoystickService
 
 
@@ -32,10 +35,15 @@ class MainWindow(QMainWindow):
 
         self._device_infos: dict[int, JoystickInfo] = {}
         self._selected_instance_id: int | None = None
+        self._latest_states: dict[int, dict[str, Any]] = {}
         self._axis_bars: list[QProgressBar] = []
         self._axis_values: list[QLabel] = []
         self._button_labels: list[QLabel] = []
         self._hat_labels: list[QLabel] = []
+        self._calibration_rows: list[tuple[QLabel, QLabel, QLabel, QLabel]] = []
+        self._calibration_session: CalibrationSession | None = None
+        self._calibration_store = CalibrationStore()
+        self._calibrations = self._calibration_store.load()
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -59,14 +67,9 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_dashboard())
         self.pages.addWidget(self._build_joystick_monitor())
-        for title in (
-            "Channel Mapping",
-            "Calibration",
-            "Profiles",
-            "Firmware",
-            "Diagnostics",
-            "Settings",
-        ):
+        self.pages.addWidget(self._build_placeholder("Channel Mapping"))
+        self.pages.addWidget(self._build_calibration_page())
+        for title in ("Profiles", "Firmware", "Diagnostics", "Settings"):
             self.pages.addWidget(self._build_placeholder(title))
 
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
@@ -90,23 +93,18 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(18)
-
         title = QLabel("Simulator Joystick to FlySky")
         title.setStyleSheet("font-size: 26px; font-weight: 700;")
         subtitle = QLabel("Universal USB simulator joystick to FlySky trainer adapter")
-
         status_row = QHBoxLayout()
         status_row.addWidget(self._status_card("ESP32-S3", "Disconnected"))
-        joystick_card, self.dashboard_joystick_value = self._status_card_with_value(
-            "Joystick", "Scanning..."
-        )
+        joystick_card, self.dashboard_joystick_value = self._status_card_with_value("Joystick", "Scanning...")
         status_row.addWidget(joystick_card)
         status_row.addWidget(self._status_card("Profile", "Default"))
-
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addLayout(status_row)
-        layout.addWidget(QLabel("Open Joystick Monitor to inspect live axes, buttons and hats."))
+        layout.addWidget(QLabel("Open Joystick Monitor to inspect inputs, then use Calibration before channel mapping."))
         layout.addStretch(1)
         return page
 
@@ -114,7 +112,6 @@ class MainWindow(QMainWindow):
         page = QWidget()
         outer = QVBoxLayout(page)
         outer.setContentsMargins(24, 20, 24, 20)
-
         title = QLabel("Joystick Monitor")
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         self.device_selector = QComboBox()
@@ -123,35 +120,68 @@ class MainWindow(QMainWindow):
         self.device_details.setWordWrap(True)
         self.backend_status = QLabel("")
         self.backend_status.setWordWrap(True)
-
         outer.addWidget(title)
         outer.addWidget(self.device_selector)
         outer.addWidget(self.device_details)
         outer.addWidget(self.backend_status)
-
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-
         self.axes_container = QWidget()
         self.axes_layout = QVBoxLayout(self.axes_container)
         content_layout.addWidget(QLabel("Axes"))
         content_layout.addWidget(self.axes_container)
-
         self.buttons_container = QWidget()
         self.buttons_layout = QGridLayout(self.buttons_container)
         content_layout.addWidget(QLabel("Buttons"))
         content_layout.addWidget(self.buttons_container)
-
         self.hats_container = QWidget()
         self.hats_layout = QVBoxLayout(self.hats_container)
         content_layout.addWidget(QLabel("Hat switches / D-pad"))
         content_layout.addWidget(self.hats_container)
         content_layout.addStretch(1)
-
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
+        return page
+
+    def _build_calibration_page(self) -> QWidget:
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 20, 24, 20)
+        title = QLabel("Joystick Calibration")
+        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        help_text = QLabel(
+            "1. Start calibration.  2. Move every stick, wheel, pedal and slider through its full range. "
+            "3. Release spring-centered controls, then capture center.  4. Save calibration."
+        )
+        help_text.setWordWrap(True)
+        self.calibration_status = QLabel("Connect and select a joystick first.")
+        button_row = QHBoxLayout()
+        self.start_calibration_button = QPushButton("Start calibration")
+        self.capture_center_button = QPushButton("Capture center")
+        self.save_calibration_button = QPushButton("Save calibration")
+        self.reset_calibration_button = QPushButton("Reset saved calibration")
+        self.start_calibration_button.clicked.connect(self._start_calibration)
+        self.capture_center_button.clicked.connect(self._capture_center)
+        self.save_calibration_button.clicked.connect(self._save_calibration)
+        self.reset_calibration_button.clicked.connect(self._reset_calibration)
+        button_row.addWidget(self.start_calibration_button)
+        button_row.addWidget(self.capture_center_button)
+        button_row.addWidget(self.save_calibration_button)
+        button_row.addWidget(self.reset_calibration_button)
+        button_row.addStretch(1)
+        self.calibration_container = QWidget()
+        self.calibration_layout = QGridLayout(self.calibration_container)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.calibration_container)
+        outer.addWidget(title)
+        outer.addWidget(help_text)
+        outer.addLayout(button_row)
+        outer.addWidget(self.calibration_status)
+        outer.addWidget(scroll, 1)
+        self._update_calibration_buttons()
         return page
 
     def _status_card(self, heading: str, value: str) -> QFrame:
@@ -180,14 +210,14 @@ class MainWindow(QMainWindow):
         for device in devices:
             self.device_selector.addItem(device.name, device.instance_id)
         self.device_selector.blockSignals(False)
-
         if not devices:
             self._selected_instance_id = None
             self.dashboard_joystick_value.setText("Not detected")
             self.device_details.setText("No SDL-compatible joystick is connected.")
             self._rebuild_monitor(None)
+            self._rebuild_calibration(None)
+            self._update_calibration_buttons()
             return
-
         selected_index = 0
         if previous_id is not None:
             for index, device in enumerate(devices):
@@ -196,30 +226,38 @@ class MainWindow(QMainWindow):
                     break
         self.device_selector.setCurrentIndex(selected_index)
         self._on_selected_device_changed(selected_index)
-        self.dashboard_joystick_value.setText(
-            devices[0].name if len(devices) == 1 else f"{len(devices)} devices"
-        )
+        self.dashboard_joystick_value.setText(devices[0].name if len(devices) == 1 else f"{len(devices)} devices")
 
     def _on_selected_device_changed(self, index: int) -> None:
         instance_id = self.device_selector.itemData(index) if index >= 0 else None
         self._selected_instance_id = instance_id
+        self._calibration_session = None
         info = self._device_infos.get(instance_id)
         if info is None:
             self._rebuild_monitor(None)
+            self._rebuild_calibration(None)
+            self._update_calibration_buttons()
             return
         self.device_details.setText(
-            f"{info.name}\nGUID: {info.guid}\n"
-            f"Axes: {info.axes} | Buttons: {info.buttons} | Hats: {info.hats} | Balls: {info.balls}"
+            f"{info.name}\nGUID: {info.guid}\nAxes: {info.axes} | Buttons: {info.buttons} | Hats: {info.hats} | Balls: {info.balls}"
         )
         self._rebuild_monitor(info)
+        self._rebuild_calibration(info)
+        saved = info.guid in self._calibrations
+        self.calibration_status.setText("Saved calibration loaded." if saved else "No saved calibration for this device.")
+        self._update_calibration_buttons()
 
     def _on_state_changed(self, snapshots: dict[int, dict[str, Any]]) -> None:
+        self._latest_states = snapshots
         if self._selected_instance_id is None:
             return
         state = snapshots.get(self._selected_instance_id)
         if state is None:
             return
-        for index, raw in enumerate(state["axes"]):
+        axes = state["axes"]
+        if self._calibration_session is not None:
+            self._calibration_session.observe(axes)
+        for index, raw in enumerate(axes):
             if index < len(self._axis_bars):
                 scaled = round((float(raw) + 1.0) * 500)
                 self._axis_bars[index].setValue(max(0, min(1000, scaled)))
@@ -230,6 +268,106 @@ class MainWindow(QMainWindow):
         for index, value in enumerate(state["hats"]):
             if index < len(self._hat_labels):
                 self._hat_labels[index].setText(f"Hat {index}: {tuple(value)}")
+        self._update_calibration_rows(axes)
+
+    def _start_calibration(self) -> None:
+        info = self._selected_info()
+        if info is None:
+            return
+        self._calibration_session = CalibrationSession(info.axes)
+        self.calibration_status.setText("Recording limits: move every control through its complete range.")
+        self._update_calibration_buttons()
+
+    def _capture_center(self) -> None:
+        if self._calibration_session is None or self._selected_instance_id is None:
+            return
+        state = self._latest_states.get(self._selected_instance_id)
+        if state is None:
+            return
+        self._calibration_session.capture_center(state["axes"])
+        self.calibration_status.setText("Center captured. Save when the min/max values look correct.")
+
+    def _save_calibration(self) -> None:
+        info = self._selected_info()
+        if info is None or self._calibration_session is None:
+            return
+        if self._calibration_session.samples < 5:
+            QMessageBox.warning(self, "Not enough samples", "Move the joystick before saving calibration.")
+            return
+        self._calibrations[info.guid] = self._calibration_session.result()
+        try:
+            self._calibration_store.save(self._calibrations)
+        except OSError as exc:
+            QMessageBox.critical(self, "Save failed", str(exc))
+            return
+        self._calibration_session = None
+        self.calibration_status.setText("Calibration saved for this joystick GUID.")
+        self._update_calibration_buttons()
+
+    def _reset_calibration(self) -> None:
+        info = self._selected_info()
+        if info is None:
+            return
+        self._calibrations.pop(info.guid, None)
+        try:
+            self._calibration_store.save(self._calibrations)
+        except OSError as exc:
+            QMessageBox.critical(self, "Reset failed", str(exc))
+            return
+        self._calibration_session = None
+        self.calibration_status.setText("Saved calibration removed. Default range is active.")
+        self._update_calibration_buttons()
+
+    def _selected_info(self) -> JoystickInfo | None:
+        return self._device_infos.get(self._selected_instance_id)
+
+    def _update_calibration_buttons(self) -> None:
+        connected = self._selected_info() is not None
+        active = self._calibration_session is not None
+        self.start_calibration_button.setEnabled(connected and not active)
+        self.capture_center_button.setEnabled(connected and active)
+        self.save_calibration_button.setEnabled(connected and active)
+        self.reset_calibration_button.setEnabled(connected)
+
+    def _rebuild_calibration(self, info: JoystickInfo | None) -> None:
+        self._clear_layout(self.calibration_layout)
+        self._calibration_rows.clear()
+        if info is None:
+            return
+        for column, heading in enumerate(("Axis", "Raw", "Minimum", "Center", "Maximum")):
+            label = QLabel(heading)
+            label.setStyleSheet("font-weight: 600;")
+            self.calibration_layout.addWidget(label, 0, column)
+        saved = self._calibrations.get(info.guid, [])
+        for axis in range(info.axes):
+            raw = QLabel("+0.0000")
+            minimum = QLabel(f"{saved[axis].minimum:+.4f}" if axis < len(saved) else "—")
+            center = QLabel(f"{saved[axis].center:+.4f}" if axis < len(saved) else "—")
+            maximum = QLabel(f"{saved[axis].maximum:+.4f}" if axis < len(saved) else "—")
+            self.calibration_layout.addWidget(QLabel(f"Axis {axis}"), axis + 1, 0)
+            self.calibration_layout.addWidget(raw, axis + 1, 1)
+            self.calibration_layout.addWidget(minimum, axis + 1, 2)
+            self.calibration_layout.addWidget(center, axis + 1, 3)
+            self.calibration_layout.addWidget(maximum, axis + 1, 4)
+            self._calibration_rows.append((raw, minimum, center, maximum))
+
+    def _update_calibration_rows(self, axes: list[float]) -> None:
+        info = self._selected_info()
+        saved = self._calibrations.get(info.guid, []) if info else []
+        for index, raw_value in enumerate(axes):
+            if index >= len(self._calibration_rows):
+                break
+            raw, minimum, center, maximum = self._calibration_rows[index]
+            raw.setText(f"{float(raw_value):+.4f}")
+            if self._calibration_session is not None:
+                session = self._calibration_session
+                minimum.setText("—" if session.minimum[index] == float("inf") else f"{session.minimum[index]:+.4f}")
+                center.setText(f"{session.center[index]:+.4f}")
+                maximum.setText("—" if session.maximum[index] == float("-inf") else f"{session.maximum[index]:+.4f}")
+            elif index < len(saved):
+                minimum.setText(f"{saved[index].minimum:+.4f}")
+                center.setText(f"{saved[index].center:+.4f}")
+                maximum.setText(f"{saved[index].maximum:+.4f}")
 
     def _on_backend_error(self, message: str) -> None:
         self.backend_status.setText(message)
@@ -244,7 +382,6 @@ class MainWindow(QMainWindow):
         self._hat_labels.clear()
         if info is None:
             return
-
         for axis_index in range(info.axes):
             row = QHBoxLayout()
             name = QLabel(f"Axis {axis_index}")
@@ -261,14 +398,12 @@ class MainWindow(QMainWindow):
             self.axes_layout.addLayout(row)
             self._axis_bars.append(bar)
             self._axis_values.append(value)
-
         for button_index in range(info.buttons):
             label = QLabel(f"B{button_index}: OFF")
             label.setFrameShape(QFrame.Shape.StyledPanel)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.buttons_layout.addWidget(label, button_index // 6, button_index % 6)
             self._button_labels.append(label)
-
         for hat_index in range(info.hats):
             label = QLabel(f"Hat {hat_index}: (0, 0)")
             self.hats_layout.addWidget(label)
