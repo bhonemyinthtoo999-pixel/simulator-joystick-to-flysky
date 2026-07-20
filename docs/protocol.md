@@ -2,7 +2,7 @@
 
 ## Transport
 
-The initial hardware transport is a 3.3 V UART exposed to Windows through a USB-to-TTL adapter. Default settings are `115200 8N1`.
+The initial hardware transport is a 3.3 V UART exposed to Windows through a USB-to-TTL adapter for ESP32-S3, or the onboard USB serial interface of an Arduino UNO/Nano. Default settings are `115200 8N1`.
 
 ## Frame format
 
@@ -25,7 +25,9 @@ CRC parameters:
 - No reflection
 - No final XOR
 
-Maximum payload: 8192 bytes.
+Maximum desktop/ESP32 payload: 8192 bytes.
+
+The Arduino UNO/Nano bridge intentionally limits received payloads to 384 bytes because the ATmega328P has 2 KB SRAM. Normal `HELLO`, `DEVICE_INFO`, `STATUS` and `LIVE_CHANNELS` frames fit within this limit. Persistent profile data remains on the desktop in Arduino bridge mode.
 
 ## Message types
 
@@ -49,15 +51,28 @@ Maximum payload: 8192 bytes.
 | 16 | `ERROR` | Device → desktop |
 | 17 | `LOG` | Device → desktop |
 
+## Device capability modes
+
+An ESP32-S3 standalone adapter reports capabilities such as `usb_hid_host`, `profiles`, `ppm` and `desktop_stream`.
+
+An Arduino UNO/Nano bridge reports `stream_only`. In this mode:
+
+- the desktop application owns calibration, mapping and profiles;
+- `LIVE_CHANNELS` contains the final pulse values sent to the PPM engine;
+- the desktop must remain connected;
+- large persistent-profile payloads are not required;
+- the firmware still provides CRC checking, status, timeout failsafe and watchdog protection.
+
 ## Safety rules
 
 - Invalid magic, length, version, JSON or CRC is discarded.
-- Profile data is validated before NVS replacement.
+- Profile data is validated before ESP32-S3 NVS replacement.
 - All channel values are clamped to `800–2200 µs`.
-- `LIVE_CHANNELS` expires after 500 ms; the firmware then returns to standalone HID mapping or failsafe.
-- Joystick input expires according to `failsafe_timeout_ms` in the active profile.
+- ESP32-S3 `LIVE_CHANNELS` expires after 500 ms; it then returns to standalone HID mapping or failsafe.
+- Arduino `LIVE_CHANNELS` expires after 700 ms; it then outputs CH3 at 1000 µs and other active channels at 1500 µs.
+- Joystick input expires according to `failsafe_timeout_ms` in an ESP32-S3 active profile.
 - Profile validation does not modify the active profile.
-- Firmware profile mapping and PPM timing remain bounded even when desktop data is malformed.
+- Firmware PPM timing remains bounded even when desktop data is malformed.
 
 ## Compatibility
 
