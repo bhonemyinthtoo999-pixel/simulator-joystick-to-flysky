@@ -28,6 +28,7 @@ class InputHandlersMixin:
         self._selected_instance_id = instance_id
         self._calibration_session = None
         self.channel_mapper.reset()
+        self.mapping_preview_mapper.reset()
         info = self._selected_info()
         saved = self.calibrations.get(info.guid, []) if info else []
         self.joystick_page.set_selected_device(info)
@@ -63,10 +64,22 @@ class InputHandlersMixin:
         info = self._selected_info()
         state = self._latest_states.get(self._selected_instance_id) if self._selected_instance_id is not None else None
         calibrations = self.calibrations.get(info.guid, []) if info else []
+
+        # Saved mappings drive the dashboard and any connected hardware.
         channels = self.channel_mapper.map_channels(state, active.mappings, calibrations)
         self._current_channels = channels
         self.dashboard_page.update_channels(channels)
-        self.mapping_page.update_preview(channels)
+
+        # Draft editor values are calculated separately for immediate feedback.
+        # They are never streamed to Arduino/ESP32 until the user saves them.
+        draft_mappings = self.mapping_page.mappings()
+        preview_channels = self.mapping_preview_mapper.map_channels(
+            state,
+            draft_mappings if draft_mappings else active.mappings,
+            calibrations,
+        )
+        self.mapping_page.update_preview(preview_channels)
+
         if self.serial_service.connected:
             self.serial_service.send(
                 MessageType.LIVE_CHANNELS,
@@ -141,6 +154,7 @@ class InputHandlersMixin:
             return
         self._save_profiles_to_disk()
         self.channel_mapper.reset()
+        self.mapping_preview_mapper.reset()
         self._refresh_profiles()
         self.diagnostics.info("Mapping", f"Saved {len(mappings)} channels to {active.name}")
 
@@ -150,5 +164,6 @@ class InputHandlersMixin:
         active.touch()
         self._save_profiles_to_disk()
         self.channel_mapper.reset()
+        self.mapping_preview_mapper.reset()
         self._refresh_profiles()
         self.diagnostics.info("Mapping", f"Reset {active.name} to defaults")
