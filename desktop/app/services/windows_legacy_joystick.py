@@ -24,9 +24,9 @@ class LegacyJoystickInfo:
 class WindowsLegacyJoystickBackend:
     """Read older Windows joysticks through the WinMM joystick API.
 
-    SDL normally provides the best device support. WinMM is kept as a fallback for
-    older DirectInput-era flight sticks that appear in Windows Game Controllers but
-    are not exposed correctly by the SDL build used by pygame.
+    SDL normally provides the best support. WinMM is exposed as a fallback for
+    older DirectInput-era flight sticks that appear in Windows Game Controllers
+    but do not update correctly through pygame's SDL backend.
     """
 
     def __init__(self) -> None:
@@ -43,6 +43,8 @@ class WindowsLegacyJoystickBackend:
         try:
             import ctypes
             from ctypes import wintypes
+
+            uint_ptr = getattr(wintypes, "UINT_PTR", ctypes.c_size_t)
 
             class JOYCAPSW(ctypes.Structure):
                 _fields_ = [
@@ -91,7 +93,7 @@ class WindowsLegacyJoystickBackend:
 
             winmm = ctypes.WinDLL("winmm")
             winmm.joyGetNumDevs.restype = wintypes.UINT
-            winmm.joyGetDevCapsW.argtypes = [wintypes.UINT_PTR, ctypes.POINTER(JOYCAPSW), wintypes.UINT]
+            winmm.joyGetDevCapsW.argtypes = [uint_ptr, ctypes.POINTER(JOYCAPSW), wintypes.UINT]
             winmm.joyGetDevCapsW.restype = wintypes.UINT
             winmm.joyGetPosEx.argtypes = [wintypes.UINT, ctypes.POINTER(JOYINFOEX)]
             winmm.joyGetPosEx.restype = wintypes.UINT
@@ -118,7 +120,12 @@ class WindowsLegacyJoystickBackend:
             device_slots = min(int(self._winmm.joyGetNumDevs()), 64)
             for device_id in range(device_slots):
                 caps = self._caps_type()
-                if self._winmm.joyGetDevCapsW(device_id, self._ctypes.byref(caps), self._ctypes.sizeof(caps)) != 0:
+                result = self._winmm.joyGetDevCapsW(
+                    device_id,
+                    self._ctypes.byref(caps),
+                    self._ctypes.sizeof(caps),
+                )
+                if result != 0:
                     continue
                 state = self._new_state()
                 if self._winmm.joyGetPosEx(device_id, self._ctypes.byref(state)) != 0:
@@ -168,17 +175,21 @@ class WindowsLegacyJoystickBackend:
                 self._normalize_axis(state.dwUpos, caps.wUmin, caps.wUmax),
                 self._normalize_axis(state.dwVpos, caps.wVmin, caps.wVmax),
             ][: device.axes]
-            buttons = [bool(int(state.dwButtons) & (1 << index)) for index in range(device.buttons)]
+            buttons = [
+                bool(int(state.dwButtons) & (1 << index))
+                for index in range(device.buttons)
+            ]
             hats = [self._pov_to_hat(int(state.dwPOV))] if device.hats else []
             snapshots[instance_id] = {
                 "instance_id": instance_id,
                 "name": device.name,
+                "guid": device.guid,
                 "axes": axis_values,
                 "buttons": buttons,
                 "hats": hats,
                 "balls": [],
                 "is_virtual": False,
-                "backend": "Windows WinMM fallback",
+                "backend": "Windows legacy",
                 "vendor_id": device.vendor_id,
                 "product_id": device.product_id,
             }
@@ -190,7 +201,7 @@ class WindowsLegacyJoystickBackend:
     def _new_state(self) -> Any:
         state = self._info_type()
         state.dwSize = self._ctypes.sizeof(self._info_type)
-        state.dwFlags = 0x000000FF
+        state.dwFlags = 0x000000FF  # JOY_RETURNALL
         return state
 
     @staticmethod
