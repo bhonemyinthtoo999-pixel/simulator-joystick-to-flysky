@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from ..services.channel_mapping_service import ChannelMapping
-from ..services.diagnostics_service import DiagnosticEntry
 from ..services.joystick_service import JoystickInfo
-from ..services.profile_service import ControllerProfile
-from ..services.settings_service import AppSettings
 from .page_common import clear_layout, page_title
 
 
@@ -68,7 +69,12 @@ class JoystickPage(QWidget):
         self.selector.blockSignals(True)
         self.selector.clear()
         for device in devices:
-            suffix = " [Demo]" if device.is_virtual else ""
+            if device.is_virtual:
+                suffix = " [Demo]"
+            elif device.backend != "SDL":
+                suffix = f" [{device.backend}]"
+            else:
+                suffix = " [SDL]"
             self.selector.addItem(f"{device.name}{suffix}", device.instance_id)
         selected_index = -1
         if devices:
@@ -93,12 +99,15 @@ class JoystickPage(QWidget):
         self._button_labels.clear()
         self._hat_labels.clear()
         if info is None:
-            self.details.setText("No compatible joystick is connected. Enable Demo Controller in Settings to test without hardware.")
+            self.details.setText(
+                "No compatible joystick is connected. Enable Demo Controller in Settings to test without hardware."
+            )
             return
         virtual = "Yes" if info.is_virtual else "No"
         self.details.setText(
-            f"{info.name}\nGUID: {info.guid}\n"
-            f"Axes: {info.axes} | Buttons: {info.buttons} | Hats: {info.hats} | Balls: {info.balls} | Virtual: {virtual}"
+            f"{info.name}\nGUID: {info.guid}\nBackend: {info.backend}\n"
+            f"Axes: {info.axes} | Buttons: {info.buttons} | Hats: {info.hats} | "
+            f"Balls: {info.balls} | Virtual: {virtual}"
         )
         for axis_index in range(info.axes):
             row = QHBoxLayout()
