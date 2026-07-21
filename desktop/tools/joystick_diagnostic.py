@@ -5,6 +5,10 @@ import sys
 import time
 
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+if sys.platform == "win32":
+    os.environ["SDL_JOYSTICK_HIDAPI"] = "0"
+    os.environ["SDL_JOYSTICK_WGI"] = "0"
+    os.environ["SDL_JOYSTICK_RAWINPUT"] = "0"
 
 import pygame
 
@@ -16,9 +20,14 @@ def main() -> int:
     pygame.event.clear()
 
     count = pygame.joystick.get_count()
-    print(f"pygame={pygame.version.ver} SDL={pygame.version.SDL} devices={count}")
+    print(
+        f"pygame={pygame.version.ver} SDL={pygame.version.SDL} devices={count} "
+        f"HIDAPI={os.environ.get('SDL_JOYSTICK_HIDAPI', 'auto')} "
+        f"WGI={os.environ.get('SDL_JOYSTICK_WGI', 'auto')} "
+        f"RAWINPUT={os.environ.get('SDL_JOYSTICK_RAWINPUT', 'auto')}"
+    )
     if count == 0:
-        print("No joystick detected by SDL.")
+        print("No joystick detected by SDL DirectInput.")
         return 1
 
     devices: list[pygame.joystick.JoystickType] = []
@@ -40,9 +49,19 @@ def main() -> int:
             pygame.event.get()
             pygame.event.pump()
             for index, joystick in enumerate(devices):
-                axes = [round(float(joystick.get_axis(axis)), 4) for axis in range(joystick.get_numaxes())]
-                buttons = [button for button in range(joystick.get_numbuttons()) if joystick.get_button(button)]
-                hats = [joystick.get_hat(hat) for hat in range(joystick.get_numhats())]
+                axes = [
+                    round(float(joystick.get_axis(axis)), 4)
+                    for axis in range(joystick.get_numaxes())
+                ]
+                buttons = [
+                    button
+                    for button in range(joystick.get_numbuttons())
+                    if joystick.get_button(button)
+                ]
+                hats = [
+                    joystick.get_hat(hat)
+                    for hat in range(joystick.get_numhats())
+                ]
                 line = f"[{index}] axes={axes} pressed={buttons} hats={hats}"
                 if line != last_lines.get(index):
                     print(line, flush=True)
