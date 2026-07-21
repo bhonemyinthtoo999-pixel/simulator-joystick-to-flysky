@@ -53,8 +53,12 @@ class JoystickService(QObject):
     window. WinMM remains a selectable fallback for very old controllers.
     """
 
-    devices_changed = Signal(list)
-    state_changed = Signal(dict)
+    # Use Python-object signals for nested dictionaries and dataclass lists.
+    # Signal(dict)/Signal(list) asks Shiboken to copy-convert the values into
+    # QVariantMap/QVariantList. Joystick snapshots use integer keys and nested
+    # tuples, so that conversion fails and the UI never receives axis updates.
+    devices_changed = Signal(object)
+    state_changed = Signal(object)
     backend_error = Signal(str)
 
     def __init__(
