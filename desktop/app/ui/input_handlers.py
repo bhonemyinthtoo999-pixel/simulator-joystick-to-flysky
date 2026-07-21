@@ -45,6 +45,7 @@ class InputHandlersMixin:
         if state is None:
             return
         self.joystick_page.update_state(state)
+        self.mapping_page.update_input_state(state)
         axes = [float(value) for value in state.get("axes", [])]
         if self._calibration_session is not None:
             self._calibration_session.observe(axes)
