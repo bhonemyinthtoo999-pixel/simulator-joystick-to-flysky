@@ -18,11 +18,13 @@ from .protocol_service import (
 
 
 class SerialService(QObject):
-    ports_changed = Signal(list)
+    # These values contain nested Python containers and optional None values.
+    # Signal(object) avoids Shiboken QVariant copy-conversion failures.
+    ports_changed = Signal(object)
     connection_changed = Signal(bool, str)
-    message_received = Signal(int, dict)
+    message_received = Signal(int, object)
     transport_error = Signal(str)
-    stats_changed = Signal(dict)
+    stats_changed = Signal(object)
 
     def __init__(self, baud: int = 115200) -> None:
         super().__init__()
