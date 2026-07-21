@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import os
+import sys
 import time
 from typing import Any
 
 # The desktop UI is owned by Qt, not SDL. Without this hint some Windows
 # DirectInput devices are enumerated but stop reporting axis changes because
-# SDL never owns the focused window.
+# SDL never owns the focused window. The main module configures the remaining
+# SDL backend hints before this module imports pygame.
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 import pygame
@@ -18,6 +20,13 @@ from .windows_legacy_joystick import LegacyJoystickInfo, WindowsLegacyJoystickBa
 
 DEMO_INSTANCE_ID = -1
 DEMO_GUID = "SIMJOY-DEMO-CONTROLLER-V1"
+_DIRECTINPUT_FORCED = (
+    sys.platform == "win32"
+    and os.environ.get("SDL_JOYSTICK_HIDAPI") == "0"
+    and os.environ.get("SDL_JOYSTICK_WGI") == "0"
+    and os.environ.get("SDL_JOYSTICK_RAWINPUT") == "0"
+)
+SDL_BACKEND_NAME = "SDL DirectInput" if _DIRECTINPUT_FORCED else "SDL Auto"
 
 
 @dataclass(frozen=True)
@@ -33,15 +42,15 @@ class JoystickInfo:
     balls: int
     power_level: str
     is_virtual: bool = False
-    backend: str = "SDL"
+    backend: str = SDL_BACKEND_NAME
 
 
 class JoystickService(QObject):
     """Detect and poll modern and legacy Windows joystick devices.
 
-    SDL is the primary backend. A hidden SDL window keeps Windows DirectInput
-    state updates alive while Qt owns the visible window. WinMM is exposed as a
-    selectable fallback for older devices whose axes remain frozen in SDL.
+    SDL DirectInput is the Windows default for traditional flight sticks. A
+    hidden SDL window keeps input state updating while Qt owns the visible
+    window. WinMM remains a selectable fallback for very old controllers.
     """
 
     devices_changed = Signal(list)
@@ -90,7 +99,7 @@ class JoystickService(QObject):
         except (pygame.error, OSError) as exc:
             self._pygame_available = False
             self.backend_error.emit(
-                f"SDL joystick backend failed; Windows legacy fallback remains available: {exc}"
+                f"{SDL_BACKEND_NAME} failed; Windows legacy fallback remains available: {exc}"
             )
         self._scan_devices(force_emit=True)
         self._poll_timer.start()
@@ -164,7 +173,7 @@ class JoystickService(QObject):
                     pass
             self._devices = found
         except pygame.error as exc:
-            self.backend_error.emit(f"SDL joystick scan failed: {exc}")
+            self.backend_error.emit(f"{SDL_BACKEND_NAME} scan failed: {exc}")
 
         legacy = self._legacy_backend.scan()
         self._legacy_devices = {device.instance_id: device for device in legacy}
@@ -217,7 +226,7 @@ class JoystickService(QObject):
                         "hats": [joystick.get_hat(i) for i in range(joystick.get_numhats())],
                         "balls": [joystick.get_ball(i) for i in range(joystick.get_numballs())],
                         "is_virtual": False,
-                        "backend": "SDL",
+                        "backend": SDL_BACKEND_NAME,
                         "timestamp": time.monotonic(),
                     }
 
@@ -226,7 +235,7 @@ class JoystickService(QObject):
                 snapshots[DEMO_INSTANCE_ID] = self._demo_state()
             self.state_changed.emit(snapshots)
         except pygame.error as exc:
-            self.backend_error.emit(f"SDL joystick read failed: {exc}")
+            self.backend_error.emit(f"{SDL_BACKEND_NAME} read failed: {exc}")
             self._scan_devices(force_emit=True)
 
     @staticmethod
@@ -245,7 +254,7 @@ class JoystickService(QObject):
             balls=joystick.get_numballs(),
             power_level=power_level,
             is_virtual=False,
-            backend="SDL",
+            backend=SDL_BACKEND_NAME,
         )
 
     @staticmethod
