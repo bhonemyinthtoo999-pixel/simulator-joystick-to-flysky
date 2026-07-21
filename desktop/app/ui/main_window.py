@@ -34,6 +34,9 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self.profile_store = ProfileStore()
         self.profile_collection: ProfileCollection = self.profile_store.load()
         self.channel_mapper = ChannelMapper()
+        # Draft edits use a separate mapper so their smoothing history and live
+        # preview cannot affect the saved profile streamed to real hardware.
+        self.mapping_preview_mapper = ChannelMapper()
         self.diagnostics = DiagnosticsService()
         self.serial_service = SerialService(self.settings.serial_baud)
         self.joystick_service = JoystickService(demo_enabled=self.settings.demo_joystick_enabled)
@@ -184,6 +187,7 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
     def _refresh_mapping_page(self) -> None:
         active = self._active_profile()
         info = self._selected_info()
+        self.mapping_preview_mapper.reset()
         self.mapping_page.set_profile(
             active,
             axes=info.axes if info else 0,
