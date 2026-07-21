@@ -7,12 +7,14 @@ import time
 from typing import Any
 
 # The desktop UI is owned by Qt, not SDL. Without this hint some Windows
-# DirectInput devices (including older Thrustmaster sticks) are enumerated by
-# SDL but stop reporting axis changes because SDL never owns the focused window.
+# DirectInput devices are enumerated but stop reporting axis changes because
+# SDL never owns the focused window.
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 import pygame
 from PySide6.QtCore import QObject, QTimer, Signal
+
+from .windows_legacy_joystick import LegacyJoystickInfo, WindowsLegacyJoystickBackend
 
 DEMO_INSTANCE_ID = -1
 DEMO_GUID = "SIMJOY-DEMO-CONTROLLER-V1"
@@ -35,10 +37,11 @@ class JoystickInfo:
 
 
 class JoystickService(QObject):
-    """Detect and poll SDL-supported USB/Bluetooth joystick devices.
+    """Detect and poll modern and legacy Windows joystick devices.
 
-    A hidden SDL window is created only to keep SDL's Windows event pump alive.
-    The visible application window remains the PySide6/Qt window.
+    SDL is the primary backend. A hidden SDL window keeps Windows DirectInput
+    state updates alive while Qt owns the visible window. WinMM is exposed as a
+    selectable fallback for older devices whose axes remain frozen in SDL.
     """
 
     devices_changed = Signal(list)
@@ -53,6 +56,9 @@ class JoystickService(QObject):
     ) -> None:
         super().__init__()
         self._devices: dict[int, pygame.joystick.JoystickType] = {}
+        self._legacy_backend = WindowsLegacyJoystickBackend()
+        self._legacy_devices: dict[int, LegacyJoystickInfo] = {}
+        self._legacy_error_reported = ""
         self._last_signature: tuple[tuple[Any, ...], ...] = ()
         self._started = False
         self._pygame_available = False
@@ -84,7 +90,7 @@ class JoystickService(QObject):
         except (pygame.error, OSError) as exc:
             self._pygame_available = False
             self.backend_error.emit(
-                f"Physical joystick backend failed; demo mode remains available: {exc}"
+                f"SDL joystick backend failed; Windows legacy fallback remains available: {exc}"
             )
         self._scan_devices(force_emit=True)
         self._poll_timer.start()
@@ -99,6 +105,7 @@ class JoystickService(QObject):
             except pygame.error:
                 pass
         self._devices.clear()
+        self._legacy_devices.clear()
         if self._pygame_available:
             pygame.joystick.quit()
             if self._hidden_display_created:
@@ -118,17 +125,13 @@ class JoystickService(QObject):
 
     def devices(self) -> list[JoystickInfo]:
         devices = [self._describe(device) for device in self._devices.values()]
+        devices.extend(self._describe_legacy(device) for device in self._legacy_devices.values())
         if self._demo_enabled:
             devices.append(self._demo_info())
         return devices
 
     def _drain_events(self) -> bool:
-        """Drain SDL's bounded event queue and report hot-plug changes.
-
-        Calling only event.pump() lets continuous JOYAXISMOTION events fill the
-        SDL queue. Once full, some DirectInput devices appear frozen even though
-        they remain connected. Draining the queue every poll prevents that.
-        """
+        """Drain SDL's bounded queue and report hot-plug changes."""
 
         if not self._pygame_available:
             return False
@@ -160,9 +163,15 @@ class JoystickService(QObject):
                 except pygame.error:
                     pass
             self._devices = found
-            self._emit_devices_if_changed(force_emit)
         except pygame.error as exc:
-            self.backend_error.emit(f"Joystick scan failed: {exc}")
+            self.backend_error.emit(f"SDL joystick scan failed: {exc}")
+
+        legacy = self._legacy_backend.scan()
+        self._legacy_devices = {device.instance_id: device for device in legacy}
+        if self._legacy_backend.last_error and self._legacy_backend.last_error != self._legacy_error_reported:
+            self._legacy_error_reported = self._legacy_backend.last_error
+            self.backend_error.emit(self._legacy_backend.last_error)
+        self._emit_devices_if_changed(force_emit)
 
     def _emit_devices_if_changed(self, force_emit: bool = False) -> None:
         infos = self.devices()
@@ -195,7 +204,6 @@ class JoystickService(QObject):
 
             snapshots: dict[int, dict[str, Any]] = {}
             if self._pygame_available:
-                # Pump once more immediately before synchronous state reads.
                 pygame.event.pump()
                 for instance_id, joystick in list(self._devices.items()):
                     if not joystick.get_init():
@@ -204,31 +212,21 @@ class JoystickService(QObject):
                         "instance_id": instance_id,
                         "name": joystick.get_name() or "Unknown joystick",
                         "guid": joystick.get_guid() or "unknown",
-                        "axes": [
-                            float(joystick.get_axis(i))
-                            for i in range(joystick.get_numaxes())
-                        ],
-                        "buttons": [
-                            bool(joystick.get_button(i))
-                            for i in range(joystick.get_numbuttons())
-                        ],
-                        "hats": [
-                            joystick.get_hat(i)
-                            for i in range(joystick.get_numhats())
-                        ],
-                        "balls": [
-                            joystick.get_ball(i)
-                            for i in range(joystick.get_numballs())
-                        ],
+                        "axes": [float(joystick.get_axis(i)) for i in range(joystick.get_numaxes())],
+                        "buttons": [bool(joystick.get_button(i)) for i in range(joystick.get_numbuttons())],
+                        "hats": [joystick.get_hat(i) for i in range(joystick.get_numhats())],
+                        "balls": [joystick.get_ball(i) for i in range(joystick.get_numballs())],
                         "is_virtual": False,
                         "backend": "SDL",
                         "timestamp": time.monotonic(),
                     }
+
+            snapshots.update(self._legacy_backend.poll())
             if self._demo_enabled:
                 snapshots[DEMO_INSTANCE_ID] = self._demo_state()
             self.state_changed.emit(snapshots)
         except pygame.error as exc:
-            self.backend_error.emit(f"Joystick read failed: {exc}")
+            self.backend_error.emit(f"SDL joystick read failed: {exc}")
             self._scan_devices(force_emit=True)
 
     @staticmethod
@@ -248,6 +246,21 @@ class JoystickService(QObject):
             power_level=power_level,
             is_virtual=False,
             backend="SDL",
+        )
+
+    @staticmethod
+    def _describe_legacy(device: LegacyJoystickInfo) -> JoystickInfo:
+        return JoystickInfo(
+            instance_id=device.instance_id,
+            name=device.name,
+            guid=device.guid,
+            axes=device.axes,
+            buttons=device.buttons,
+            hats=device.hats,
+            balls=0,
+            power_level="wired",
+            is_virtual=False,
+            backend="Windows legacy",
         )
 
     @staticmethod
