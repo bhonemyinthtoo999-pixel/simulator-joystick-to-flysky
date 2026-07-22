@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from .calibration_service import AxisCalibration
+from .device_role_service import ROLE_ORDER
 
 SourceType = Literal["none", "axis", "button", "hat", "constant"]
 AxisMode = Literal["centered", "unipolar"]
@@ -11,14 +12,11 @@ AxisMode = Literal["centered", "unipolar"]
 
 @dataclass
 class ChannelMapping:
-    """One RC output channel mapping.
-
-    The model is intentionally device-agnostic. A mapping can read an axis,
-    button, hat component, or a constant value from any SDL-compatible device.
-    """
+    """One RC output channel mapping, including its logical device role."""
 
     channel: int
     name: str
+    source_role: str = "primary_stick"
     source_type: SourceType = "none"
     source_index: int = 0
     hat_component: Literal["x", "y"] = "x"
@@ -37,6 +35,8 @@ class ChannelMapping:
         errors: list[str] = []
         if not 1 <= self.channel <= 16:
             errors.append("channel must be between 1 and 16")
+        if self.source_role not in ROLE_ORDER:
+            errors.append("unsupported source_role")
         if self.source_type not in {"none", "axis", "button", "hat", "constant"}:
             errors.append("unsupported source_type")
         if self.mode not in {"centered", "unipolar"}:
@@ -66,17 +66,26 @@ class ChannelMapping:
     def from_dict(cls, payload: dict[str, Any]) -> "ChannelMapping":
         allowed = cls.__dataclass_fields__.keys()
         values = {key: value for key, value in payload.items() if key in allowed}
+        # Profiles created before multi-device support implicitly used the
+        # selected/primary joystick for every channel except throttle.
+        if "source_role" not in values:
+            channel = int(values.get("channel", 1))
+            values["source_role"] = "throttle" if channel == 3 else "primary_stick"
         return cls(**values)
 
 
 class ChannelMapper:
-    """Convert a generic joystick snapshot into safe RC pulse values."""
+    """Convert one or more joystick snapshots into safe RC pulse values."""
 
     def __init__(self) -> None:
-        self._smoothed: dict[int, float] = {}
+        self._smoothed: dict[tuple[str, int], float] = {}
+        self.last_strict_failsafe = False
+        self.last_missing_aetr_roles: list[str] = []
 
     def reset(self) -> None:
         self._smoothed.clear()
+        self.last_strict_failsafe = False
+        self.last_missing_aetr_roles = []
 
     def map_channels(
         self,
@@ -84,8 +93,52 @@ class ChannelMapper:
         mappings: list[ChannelMapping],
         calibrations: list[AxisCalibration] | None = None,
     ) -> list[int]:
+        """Backward-compatible single-device mapper used by older tests/tools."""
+
         calibrations = calibrations or []
-        return [self._map_one(state, mapping, calibrations) for mapping in mappings]
+        self.last_strict_failsafe = False
+        self.last_missing_aetr_roles = []
+        return [
+            self._map_one(state, mapping, calibrations, ("legacy", mapping.channel))[0]
+            for mapping in mappings
+        ]
+
+    def map_channels_multi(
+        self,
+        role_states: dict[str, dict[str, Any] | None],
+        mappings: list[ChannelMapping],
+        calibrations_by_guid: dict[str, list[AxisCalibration]] | None = None,
+        role_guids: dict[str, str] | None = None,
+        strict_aetr_failsafe: bool = True,
+    ) -> list[int]:
+        calibrations_by_guid = calibrations_by_guid or {}
+        role_guids = role_guids or {}
+        output: list[int] = []
+        invalid_aetr_roles: set[str] = set()
+
+        for mapping in mappings:
+            role = mapping.source_role if mapping.source_role in ROLE_ORDER else "primary_stick"
+            state = role_states.get(role)
+            guid = role_guids.get(role, "")
+            calibration = calibrations_by_guid.get(guid, [])
+            pulse, valid = self._map_one(
+                state,
+                mapping,
+                calibration,
+                (role, mapping.channel),
+            )
+            output.append(pulse)
+            if mapping.channel <= 4 and mapping.source_type != "constant" and not valid:
+                invalid_aetr_roles.add(role)
+
+        self.last_strict_failsafe = bool(strict_aetr_failsafe and invalid_aetr_roles)
+        self.last_missing_aetr_roles = sorted(invalid_aetr_roles)
+        if self.last_strict_failsafe:
+            for index, mapping in enumerate(mappings):
+                if mapping.channel <= 4:
+                    output[index] = self._clamp_pulse(mapping.failsafe, mapping)
+                    self._smoothed.pop((mapping.source_role, mapping.channel), None)
+        return output
 
     def failsafe_channels(self, mappings: list[ChannelMapping]) -> list[int]:
         return [self._clamp_pulse(mapping.failsafe, mapping) for mapping in mappings]
@@ -95,26 +148,28 @@ class ChannelMapper:
         state: dict[str, Any] | None,
         mapping: ChannelMapping,
         calibrations: list[AxisCalibration],
-    ) -> int:
-        if state is None or mapping.source_type == "none":
-            return self._clamp_pulse(mapping.failsafe, mapping)
+        smoothing_key: tuple[str, int],
+    ) -> tuple[int, bool]:
+        if mapping.source_type == "none":
+            return self._clamp_pulse(mapping.failsafe, mapping), False
+        if state is None and mapping.source_type != "constant":
+            return self._clamp_pulse(mapping.failsafe, mapping), False
 
-        normalized = self._read_source(state, mapping, calibrations)
+        normalized = self._read_source(state or {}, mapping, calibrations)
         if normalized is None:
-            return self._clamp_pulse(mapping.failsafe, mapping)
+            return self._clamp_pulse(mapping.failsafe, mapping), False
 
         normalized = max(-1.0, min(1.0, normalized))
         if mapping.reversed:
             normalized = -normalized
 
-        # Positive expo softens the center while preserving both end points.
         expo = max(0.0, min(1.0, float(mapping.expo)))
         normalized = ((1.0 - expo) * normalized) + (expo * normalized**3)
 
         smoothing = max(0.0, min(0.99, float(mapping.smoothing)))
-        previous = self._smoothed.get(mapping.channel, normalized)
+        previous = self._smoothed.get(smoothing_key, normalized)
         normalized = (previous * smoothing) + (normalized * (1.0 - smoothing))
-        self._smoothed[mapping.channel] = normalized
+        self._smoothed[smoothing_key] = normalized
 
         if mapping.mode == "unipolar":
             unit = (normalized + 1.0) * 0.5
@@ -125,7 +180,7 @@ class ChannelMapper:
             pulse = mapping.center + normalized * (mapping.center - mapping.minimum)
 
         pulse += mapping.trim
-        return self._clamp_pulse(round(pulse), mapping)
+        return self._clamp_pulse(round(pulse), mapping), True
 
     @staticmethod
     def _read_source(
@@ -174,6 +229,7 @@ def default_mappings(channel_count: int = 8) -> list[ChannelMapping]:
         mapping = ChannelMapping(
             channel=index + 1,
             name=names[index] if index < len(names) else f"CH{index + 1}",
+            source_role="throttle" if index == 2 else "primary_stick",
         )
         if index < 4:
             mapping.source_type = "axis"

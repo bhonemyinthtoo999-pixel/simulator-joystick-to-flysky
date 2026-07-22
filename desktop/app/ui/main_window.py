@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QListWidget, QListWidgetItem, QMainWi
 
 from ..services.calibration_service import CalibrationSession, CalibrationStore
 from ..services.channel_mapping_service import ChannelMapper
+from ..services.device_role_service import DeviceRoleResolver, ResolvedDeviceRoles
 from ..services.diagnostics_service import DiagnosticsService
 from ..services.joystick_service import JoystickInfo, JoystickService
 from ..services.profile_service import ControllerProfile, ProfileCollection, ProfileStore
@@ -34,9 +35,8 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self.profile_store = ProfileStore()
         self.profile_collection: ProfileCollection = self.profile_store.load()
         self.channel_mapper = ChannelMapper()
-        # Draft edits use a separate mapper so their smoothing history and live
-        # preview cannot affect the saved profile streamed to real hardware.
         self.mapping_preview_mapper = ChannelMapper()
+        self.device_role_resolver = DeviceRoleResolver()
         self.diagnostics = DiagnosticsService()
         self.serial_service = SerialService(self.settings.serial_baud)
         self.joystick_service = JoystickService(demo_enabled=self.settings.demo_joystick_enabled)
@@ -171,6 +171,15 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
     def _selected_info(self) -> JoystickInfo | None:
         return self._device_infos.get(self._selected_instance_id)
 
+    def _resolved_inputs(self, profile: ControllerProfile | None = None) -> ResolvedDeviceRoles:
+        active = profile or self._active_profile()
+        return self.device_role_resolver.resolve(
+            active.device_bindings,
+            list(self._device_infos.values()),
+            self._latest_states,
+            self._selected_instance_id,
+        )
+
     def _refresh_profiles(self) -> None:
         active = self._active_profile()
         self.dashboard_page.profile_value.setText(active.name)
@@ -186,11 +195,9 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
 
     def _refresh_mapping_page(self) -> None:
         active = self._active_profile()
-        info = self._selected_info()
         self.mapping_preview_mapper.reset()
         self.mapping_page.set_profile(
             active,
-            axes=info.axes if info else 0,
-            buttons=info.buttons if info else 0,
-            hats=info.hats if info else 0,
+            list(self._device_infos.values()),
+            self._selected_instance_id,
         )

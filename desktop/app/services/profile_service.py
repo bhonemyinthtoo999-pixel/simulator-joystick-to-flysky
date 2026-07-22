@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from .channel_mapping_service import ChannelMapping, default_mappings
+from .device_role_service import ROLE_ORDER, default_device_bindings
 
 
 def _utc_now() -> str:
@@ -18,7 +19,10 @@ def _utc_now() -> str:
 class ControllerProfile:
     profile_id: str
     name: str
+    # Kept for backward compatibility with profiles created before role binding.
     device_guid: str = "*"
+    device_bindings: dict[str, str] = field(default_factory=default_device_bindings)
+    strict_aetr_failsafe: bool = True
     channel_count: int = 8
     mappings: list[ChannelMapping] = field(default_factory=default_mappings)
     ppm_frame_us: int = 22500
@@ -45,6 +49,9 @@ class ControllerProfile:
             errors.append("channel_count must be 4..16")
         if len(self.mappings) != self.channel_count:
             errors.append("mapping count must equal channel_count")
+        for role in self.device_bindings:
+            if role not in ROLE_ORDER:
+                errors.append(f"unsupported device role: {role}")
         if not 10000 <= self.ppm_frame_us <= 40000:
             errors.append("ppm_frame_us must be 10000..40000")
         if not 100 <= self.ppm_pulse_us <= 1000:
@@ -70,8 +77,20 @@ class ControllerProfile:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ControllerProfile":
-        values = dict(payload)
+        allowed = cls.__dataclass_fields__.keys()
+        values = {key: value for key, value in payload.items() if key in allowed}
         values["mappings"] = [ChannelMapping.from_dict(item) for item in payload.get("mappings", [])]
+        bindings = default_device_bindings()
+        raw_bindings = payload.get("device_bindings", {})
+        if isinstance(raw_bindings, dict):
+            bindings.update({str(key): str(value) for key, value in raw_bindings.items() if key in ROLE_ORDER})
+        # Migrate the legacy single-device GUID to the primary role.
+        legacy_guid = str(payload.get("device_guid", "*"))
+        if "device_bindings" not in payload and legacy_guid:
+            bindings["primary_stick"] = legacy_guid
+            bindings["throttle"] = legacy_guid
+        values["device_bindings"] = bindings
+        values.setdefault("strict_aetr_failsafe", True)
         profile = cls(**values)
         if not profile.mappings:
             profile.mappings = default_mappings(profile.channel_count)
@@ -109,7 +128,7 @@ class ProfileStore:
     def save(self, collection: ProfileCollection) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "active_profile_id": collection.active_profile_id,
             "profiles": [profile.to_dict() for profile in collection.profiles],
         }
@@ -143,7 +162,7 @@ class ProfileStore:
 
     @staticmethod
     def export_profile(profile: ControllerProfile, path: Path) -> None:
-        path.write_text(json.dumps({"schema_version": 1, "profile": profile.to_dict()}, indent=2), encoding="utf-8")
+        path.write_text(json.dumps({"schema_version": 2, "profile": profile.to_dict()}, indent=2), encoding="utf-8")
 
     @staticmethod
     def import_profile(path: Path) -> ControllerProfile:

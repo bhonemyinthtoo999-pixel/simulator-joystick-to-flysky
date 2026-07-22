@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
+from .device_role_service import ROLE_ORDER
+
 
 @dataclass(frozen=True)
 class AutoMapStep:
@@ -17,18 +19,14 @@ class AutoMapStep:
 @dataclass(frozen=True)
 class AutoMapCapture:
     step: AutoMapStep
+    source_role: str
     axis_index: int
     reversed: bool
     change: float
 
 
 class AutoMappingSession:
-    """Identify the primary flight-control axes from deliberate user motion.
-
-    Each step captures the strongest unused axis. The requested movement is
-    considered the positive RC direction, so a negative raw delta automatically
-    enables channel reversal.
-    """
+    """Identify AETR axes across any number of role-bound USB devices."""
 
     DEFAULT_STEPS = (
         AutoMapStep(0, "Roll", "Move the roll control fully RIGHT", "centered", 1500),
@@ -42,8 +40,8 @@ class AutoMappingSession:
         self.arm_delay_s = max(0.0, float(arm_delay_s))
         self.steps = self.DEFAULT_STEPS
         self.step_index = 0
-        self.used_axes: set[int] = set()
-        self.baseline: list[float] = []
+        self.used_axes: set[tuple[str, int]] = set()
+        self.baseline: dict[str, list[float]] = {}
         self.armed_at = 0.0
         self.active = False
 
@@ -63,10 +61,15 @@ class AutoMappingSession:
     def complete(self) -> bool:
         return self.step_index >= len(self.steps)
 
-    def start(self, state: dict[str, Any], now: float | None = None) -> None:
-        axes = self._axes(state)
-        if len(axes) < len(self.steps):
-            raise ValueError("At least four joystick axes are required for automatic flight-control mapping.")
+    def start(
+        self,
+        role_states: dict[str, dict[str, Any] | None],
+        now: float | None = None,
+    ) -> None:
+        axes = self._all_axes(role_states)
+        total_axes = sum(len(values) for values in axes.values())
+        if total_axes < len(self.steps):
+            raise ValueError("At least four total axes across the bound devices are required for automatic AETR mapping.")
         self.step_index = 0
         self.used_axes.clear()
         self.active = True
@@ -74,32 +77,36 @@ class AutoMappingSession:
 
     def cancel(self) -> None:
         self.active = False
-        self.baseline = []
+        self.baseline = {}
         self.used_axes.clear()
 
-    def observe(self, state: dict[str, Any], now: float | None = None) -> AutoMapCapture | None:
+    def observe(
+        self,
+        role_states: dict[str, dict[str, Any] | None],
+        now: float | None = None,
+    ) -> AutoMapCapture | None:
         if not self.active or self.complete:
             return None
-        axes = self._axes(state)
-        if len(axes) != len(self.baseline):
-            self._arm(axes, now)
-            return None
-
+        axes_by_role = self._all_axes(role_states)
         timestamp = time.monotonic() if now is None else float(now)
         if timestamp < self.armed_at:
-            # Track the resting position while the user releases the previous control.
-            self.baseline = axes
+            self.baseline = {role: list(values) for role, values in axes_by_role.items()}
             return None
 
+        strongest_role = ""
         strongest_axis = -1
         strongest_delta = 0.0
-        for index, (before, current) in enumerate(zip(self.baseline, axes)):
-            if index in self.used_axes:
-                continue
-            delta = current - before
-            if abs(delta) > abs(strongest_delta):
-                strongest_axis = index
-                strongest_delta = delta
+        for role in ROLE_ORDER:
+            before = self.baseline.get(role, [])
+            current = axes_by_role.get(role, [])
+            for index in range(min(len(before), len(current))):
+                if (role, index) in self.used_axes:
+                    continue
+                delta = current[index] - before[index]
+                if abs(delta) > abs(strongest_delta):
+                    strongest_role = role
+                    strongest_axis = index
+                    strongest_delta = delta
 
         if strongest_axis < 0 or abs(strongest_delta) < self.threshold:
             return None
@@ -107,27 +114,34 @@ class AutoMappingSession:
         step = self.steps[self.step_index]
         capture = AutoMapCapture(
             step=step,
+            source_role=strongest_role,
             axis_index=strongest_axis,
             reversed=strongest_delta < 0.0,
             change=strongest_delta,
         )
-        self.used_axes.add(strongest_axis)
+        self.used_axes.add((strongest_role, strongest_axis))
         self.step_index += 1
         if self.complete:
             self.active = False
-            self.baseline = []
+            self.baseline = {}
         else:
-            self._arm(axes, timestamp)
+            self._arm(axes_by_role, timestamp)
         return capture
 
-    def _arm(self, axes: list[float], now: float | None) -> None:
+    def _arm(self, axes: dict[str, list[float]], now: float | None) -> None:
         timestamp = time.monotonic() if now is None else float(now)
-        self.baseline = list(axes)
+        self.baseline = {role: list(values) for role, values in axes.items()}
         self.armed_at = timestamp + self.arm_delay_s
 
     @staticmethod
-    def _axes(state: dict[str, Any]) -> list[float]:
-        try:
-            return [float(value) for value in state.get("axes", [])]
-        except (TypeError, ValueError):
-            return []
+    def _all_axes(role_states: dict[str, dict[str, Any] | None]) -> dict[str, list[float]]:
+        result: dict[str, list[float]] = {}
+        for role in ROLE_ORDER:
+            state = role_states.get(role)
+            if not state:
+                continue
+            try:
+                result[role] = [float(value) for value in state.get("axes", [])]
+            except (TypeError, ValueError):
+                result[role] = []
+        return result
