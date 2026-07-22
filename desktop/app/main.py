@@ -30,7 +30,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 
 
 def main() -> int:
@@ -39,7 +39,7 @@ def main() -> int:
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("Simulator Joystick to FlySky")
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
-    app.setProperty("simjoyFeatureSet", "multi-device-aetr")
+    app.setProperty("simjoyFeatureSet", "multi-device-aetr-board-aware-adapter")
 
     def show_unhandled_exception(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
         details = "".join(traceback.format_exception(exc_type, exc, tb))
