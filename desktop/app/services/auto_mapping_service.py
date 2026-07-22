@@ -14,6 +14,7 @@ class AutoMapStep:
     prompt: str
     mode: str
     failsafe: int
+    preferred_role: str
 
 
 @dataclass(frozen=True)
@@ -29,10 +30,10 @@ class AutoMappingSession:
     """Identify AETR axes across one or more role-bound USB devices."""
 
     DEFAULT_STEPS = (
-        AutoMapStep(0, "Roll", "Move the roll control fully RIGHT", "centered", 1500),
-        AutoMapStep(1, "Pitch", "Pull the pitch control fully BACK", "centered", 1500),
-        AutoMapStep(2, "Throttle", "Move the throttle to FULL / HIGH", "unipolar", 1000),
-        AutoMapStep(3, "Yaw", "Move the rudder or twist control fully RIGHT", "centered", 1500),
+        AutoMapStep(0, "Roll", "Move the roll control fully RIGHT", "centered", 1500, "primary_stick"),
+        AutoMapStep(1, "Pitch", "Pull the pitch control fully BACK", "centered", 1500, "primary_stick"),
+        AutoMapStep(2, "Throttle", "Move the throttle to FULL / HIGH", "unipolar", 1000, "throttle"),
+        AutoMapStep(3, "Yaw", "Move the rudder, pedals or twist control fully RIGHT", "centered", 1500, "primary_stick"),
     )
 
     def __init__(self, threshold: float = 0.25, arm_delay_s: float = 0.35) -> None:
@@ -40,6 +41,8 @@ class AutoMappingSession:
         self.arm_delay_s = max(0.0, float(arm_delay_s))
         self.steps = self.DEFAULT_STEPS
         self.step_index = 0
+        # Keys use the physical device identity when available, preventing one
+        # axis from being assigned twice when two roles resolve to one HOTAS.
         self.used_axes: set[tuple[str, int]] = set()
         self.baseline: dict[str, list[float]] = {}
         self.armed_at = 0.0
@@ -61,15 +64,15 @@ class AutoMappingSession:
     def complete(self) -> bool:
         return self.step_index >= len(self.steps)
 
-    def start(
-        self,
-        states: dict[str, Any],
-        now: float | None = None,
-    ) -> None:
+    def start(self, states: dict[str, Any], now: float | None = None) -> None:
         role_states = self._coerce_role_states(states)
         axes = self._all_axes(role_states)
-        total_axes = sum(len(values) for values in axes.values())
-        if total_axes < len(self.steps):
+        unique_axes = {
+            self._axis_key(role, role_states.get(role), index)
+            for role, values in axes.items()
+            for index in range(len(values))
+        }
+        if len(unique_axes) < len(self.steps):
             raise ValueError("At least four joystick axes across the bound devices are required for automatic AETR mapping.")
         self.step_index = 0
         self.used_axes.clear()
@@ -81,11 +84,7 @@ class AutoMappingSession:
         self.baseline = {}
         self.used_axes.clear()
 
-    def observe(
-        self,
-        states: dict[str, Any],
-        now: float | None = None,
-    ) -> AutoMapCapture | None:
+    def observe(self, states: dict[str, Any], now: float | None = None) -> AutoMapCapture | None:
         if not self.active or self.complete:
             return None
         role_states = self._coerce_role_states(states)
@@ -95,17 +94,32 @@ class AutoMappingSession:
             self.baseline = {role: list(values) for role, values in axes_by_role.items()}
             return None
 
+        step = self.steps[self.step_index]
+        role_order = [step.preferred_role] + [role for role in ROLE_ORDER if role != step.preferred_role]
         strongest_role = ""
         strongest_axis = -1
         strongest_delta = 0.0
-        for role in ROLE_ORDER:
+        strongest_preferred = False
+
+        for role in role_order:
             before = self.baseline.get(role, [])
             current = axes_by_role.get(role, [])
+            state = role_states.get(role)
             for index in range(min(len(before), len(current))):
-                if (role, index) in self.used_axes:
+                key = self._axis_key(role, state, index)
+                if key in self.used_axes:
                     continue
                 delta = current[index] - before[index]
-                if abs(delta) > abs(strongest_delta):
+                preferred = role == step.preferred_role
+                # Prefer the expected role when its motion is deliberate. This
+                # makes a separate throttle win the Throttle step even when a
+                # combined HOTAS exposes the same physical device under roles.
+                if abs(delta) >= self.threshold and preferred and not strongest_preferred:
+                    strongest_role = role
+                    strongest_axis = index
+                    strongest_delta = delta
+                    strongest_preferred = True
+                elif preferred == strongest_preferred and abs(delta) > abs(strongest_delta):
                     strongest_role = role
                     strongest_axis = index
                     strongest_delta = delta
@@ -113,7 +127,6 @@ class AutoMappingSession:
         if strongest_axis < 0 or abs(strongest_delta) < self.threshold:
             return None
 
-        step = self.steps[self.step_index]
         capture = AutoMapCapture(
             step=step,
             source_role=strongest_role,
@@ -121,7 +134,7 @@ class AutoMappingSession:
             reversed=strongest_delta < 0.0,
             change=strongest_delta,
         )
-        self.used_axes.add((strongest_role, strongest_axis))
+        self.used_axes.add(self._axis_key(strongest_role, role_states.get(strongest_role), strongest_axis))
         self.step_index += 1
         if self.complete:
             self.active = False
@@ -137,7 +150,6 @@ class AutoMappingSession:
 
     @staticmethod
     def _coerce_role_states(states: dict[str, Any]) -> dict[str, dict[str, Any] | None]:
-        # Backward compatibility: older callers pass one snapshot directly.
         if "axes" in states or "buttons" in states or "hats" in states:
             return {"primary_stick": states}
         return {
@@ -158,3 +170,9 @@ class AutoMappingSession:
             except (TypeError, ValueError):
                 result[role] = []
         return result
+
+    @staticmethod
+    def _axis_key(role: str, state: dict[str, Any] | None, axis_index: int) -> tuple[str, int]:
+        state = state or {}
+        identity = state.get("guid") or state.get("instance_id") or role
+        return (str(identity), axis_index)
