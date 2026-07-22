@@ -18,9 +18,6 @@ def _configure_windows_joystick_backend() -> str:
     default_mode = "directinput" if sys.platform == "win32" else "auto"
     mode = os.environ.get("SIMJOY_INPUT_BACKEND", default_mode).strip().casefold()
     if sys.platform == "win32" and mode == "directinput":
-        # These hints must be set before SDL/pygame initializes the joystick
-        # subsystem. Disabling HIDAPI, WGI and RawInput leaves DirectInput as
-        # SDL's Windows joystick provider for traditional flight sticks.
         os.environ["SDL_JOYSTICK_HIDAPI"] = "0"
         os.environ["SDL_JOYSTICK_WGI"] = "0"
         os.environ["SDL_JOYSTICK_RAWINPUT"] = "0"
@@ -33,7 +30,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.4.0"
 
 
 def main() -> int:
@@ -42,6 +39,7 @@ def main() -> int:
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("Simulator Joystick to FlySky")
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
+    app.setProperty("simjoyFeatureSet", "multi-device-aetr")
 
     def show_unhandled_exception(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
         details = "".join(traceback.format_exception(exc_type, exc, tb))
