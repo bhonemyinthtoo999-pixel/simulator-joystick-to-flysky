@@ -45,10 +45,9 @@ class InputHandlersMixin:
 
     def _on_state_changed(self, snapshots: dict[int, dict[str, Any]]) -> None:
         self._latest_states = snapshots
-        active = self._active_profile()
-        resolved = self._resolved_inputs(active)
-        self.mapping_page.update_input_states(resolved.states)
-
+        # Channel Mapping observes the draft role bindings only from the channel
+        # timer. Sending active-profile states here as well could let one physical
+        # movement be observed twice under two different role configurations.
         if self._selected_instance_id is None:
             return
         state = snapshots.get(self._selected_instance_id)
