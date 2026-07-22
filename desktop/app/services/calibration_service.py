@@ -15,6 +15,8 @@ class AxisCalibration:
     inverted: bool = False
 
     def normalize(self, raw: float) -> float:
+        """Normalize a spring-centered axis around its captured neutral point."""
+
         raw = max(self.minimum, min(self.maximum, float(raw)))
         if raw >= self.center:
             span = max(1e-6, self.maximum - self.center)
@@ -28,7 +30,28 @@ class AxisCalibration:
             value = -value
         return max(-1.0, min(1.0, value))
 
-    def to_rc(self, raw: float, rc_min: int = 1000, rc_center: int = 1500, rc_max: int = 2000) -> int:
+    def normalize_unipolar(self, raw: float) -> float:
+        """Normalize a throttle/slider using only its captured end points.
+
+        A throttle has no physical center. Ignoring the captured center ensures
+        idle/minimum maps to -1 and full/maximum maps to +1 even when the user
+        captures neutral with the throttle left at idle.
+        """
+
+        clamped = max(self.minimum, min(self.maximum, float(raw)))
+        span = max(1e-6, self.maximum - self.minimum)
+        value = ((clamped - self.minimum) / span) * 2.0 - 1.0
+        if self.inverted:
+            value = -value
+        return max(-1.0, min(1.0, value))
+
+    def to_rc(
+        self,
+        raw: float,
+        rc_min: int = 1000,
+        rc_center: int = 1500,
+        rc_max: int = 2000,
+    ) -> int:
         value = self.normalize(raw)
         if value >= 0:
             pulse = rc_center + value * (rc_max - rc_center)
@@ -72,13 +95,17 @@ class CalibrationSession:
             if maximum - minimum < 0.05:
                 minimum, maximum = -1.0, 1.0
             center = max(minimum, min(maximum, self.center[index]))
-            result.append(AxisCalibration(minimum=minimum, center=center, maximum=maximum))
+            result.append(
+                AxisCalibration(minimum=minimum, center=center, maximum=maximum)
+            )
         return result
 
 
 class CalibrationStore:
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or (Path.home() / ".simulator-joystick-to-flysky" / "calibrations.json")
+        self.path = path or (
+            Path.home() / ".simulator-joystick-to-flysky" / "calibrations.json"
+        )
 
     def load(self) -> dict[str, list[AxisCalibration]]:
         if not self.path.exists():
@@ -95,7 +122,10 @@ class CalibrationStore:
 
     def save(self, data: dict[str, list[AxisCalibration]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {guid: [asdict(axis) for axis in axes] for guid, axes in data.items()}
+        payload = {
+            guid: [asdict(axis) for axis in axes]
+            for guid, axes in data.items()
+        }
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         temporary.replace(self.path)
