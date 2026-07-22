@@ -17,12 +17,17 @@ class InputHandlersMixin:
         self._select_device(selected)
         physical = [device for device in devices if not device.is_virtual]
         if physical:
-            self.dashboard_page.joystick_value.setText(physical[0].name if len(physical) == 1 else f"{len(physical)} physical devices")
+            self.dashboard_page.joystick_value.setText(
+                physical[0].name if len(physical) == 1 else f"{len(physical)} physical devices"
+            )
         elif devices:
             self.dashboard_page.joystick_value.setText("Demo Controller")
         else:
             self.dashboard_page.joystick_value.setText("Not detected")
-        self.diagnostics.info("Joystick", f"Device list changed: {len(physical)} physical, {len(devices) - len(physical)} demo")
+        self.diagnostics.info(
+            "Joystick",
+            f"Device list changed: {len(physical)} physical, {len(devices) - len(physical)} demo",
+        )
 
     def _select_device(self, instance_id: int | None) -> None:
         self._selected_instance_id = instance_id
@@ -62,7 +67,11 @@ class InputHandlersMixin:
     def _channel_tick(self) -> None:
         active = self._active_profile()
         info = self._selected_info()
-        state = self._latest_states.get(self._selected_instance_id) if self._selected_instance_id is not None else None
+        state = (
+            self._latest_states.get(self._selected_instance_id)
+            if self._selected_instance_id is not None
+            else None
+        )
         calibrations = self.calibrations.get(info.guid, []) if info else []
 
         # Saved mappings drive the dashboard and any connected hardware.
@@ -95,8 +104,12 @@ class InputHandlersMixin:
         if info is None:
             return
         self._calibration_session = CalibrationSession(info.axes)
-        self.calibration_page.status.setText("Recording limits: move every control through its complete range.")
+        self.calibration_page.status.setText(
+            "Recording limits: move every axis slowly through its complete physical range. "
+            "The captured range should approach 2.000 for a full -1 to +1 axis."
+        )
         self.calibration_page.set_buttons(True, True, info.guid in self.calibrations)
+        self.calibration_page._set_step(2)
         self.diagnostics.info("Calibration", f"Started for {info.name}")
 
     def _capture_center(self) -> None:
@@ -106,7 +119,10 @@ class InputHandlersMixin:
         if state is None:
             return
         self._calibration_session.capture_center(state.get("axes", []))
-        self.calibration_page.status.setText("Center captured. Save when the min/max values look correct.")
+        self.calibration_page.status.setText(
+            "Neutral position captured. Check that centered controls are released and throttle remains at its normal idle position, then save."
+        )
+        self.calibration_page._set_step(3)
         self.diagnostics.info("Calibration", "Center captured")
 
     def _save_calibration(self) -> None:
@@ -115,7 +131,11 @@ class InputHandlersMixin:
         if info is None or session is None:
             return
         if session.samples < 5:
-            QMessageBox.warning(self, "Not enough samples", "Move the joystick before saving calibration.")
+            QMessageBox.warning(
+                self,
+                "Not enough samples",
+                "Move the joystick through its complete range before saving calibration.",
+            )
             return
         self.calibrations[info.guid] = session.result()
         try:
@@ -126,7 +146,10 @@ class InputHandlersMixin:
         self._calibration_session = None
         self.calibration_page.set_device(info, self.calibrations[info.guid])
         self.calibration_page.status.setText("Calibration saved for this joystick GUID.")
-        self.diagnostics.info("Calibration", f"Saved {len(self.calibrations[info.guid])} axes")
+        self.calibration_page._set_step(4)
+        self.diagnostics.info(
+            "Calibration", f"Saved {len(self.calibrations[info.guid])} axes"
+        )
 
     def _reset_calibration(self) -> None:
         info = self._selected_info()
@@ -140,7 +163,10 @@ class InputHandlersMixin:
             return
         self._calibration_session = None
         self.calibration_page.set_device(info, [])
-        self.calibration_page.status.setText("Saved calibration removed. Default range is active.")
+        self.calibration_page.status.setText(
+            "Saved calibration removed. Default -1 to +1 range is active."
+        )
+        self.calibration_page._set_step(1)
         self.diagnostics.info("Calibration", f"Reset calibration for {info.name}")
 
     def _save_mappings(self, mappings: list[Any]) -> None:
