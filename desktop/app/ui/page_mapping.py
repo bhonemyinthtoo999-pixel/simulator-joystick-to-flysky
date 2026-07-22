@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..services.auto_mapping_service import AutoMapCapture, AutoMappingSession
 from ..services.channel_mapping_service import ChannelMapping
 from ..services.profile_service import ControllerProfile
 from .page_common import page_title
@@ -49,6 +51,7 @@ class MappingPage(QWidget):
         self._latest_input_state: dict[str, Any] = {}
         self._learn_baseline: dict[str, Any] | None = None
         self._learning = False
+        self._auto_session: AutoMappingSession | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(22, 18, 22, 18)
@@ -57,7 +60,7 @@ class MappingPage(QWidget):
 
         subtitle = QLabel(
             "Select one RC channel, assign a joystick control, then tune its output. "
-            "Use Learn Input to identify an axis, button or hat automatically."
+            "Use Learn Input for one channel or Auto-map Flight Controls for Roll, Pitch, Throttle and Yaw."
         )
         subtitle.setWordWrap(True)
         outer.addWidget(subtitle)
@@ -67,16 +70,33 @@ class MappingPage(QWidget):
         self.context_label.setStyleSheet("font-weight: 600;")
         self.save_status = QLabel("")
         self.save_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.auto_map_button = QPushButton("Auto-map Flight Controls")
         self.apply_button = QPushButton("Save changes")
         self.reset_button = QPushButton("Reset defaults")
+        self.auto_map_button.clicked.connect(self._toggle_auto_mapping)
         self.apply_button.clicked.connect(self._emit_apply)
         self.reset_button.clicked.connect(self.reset_requested.emit)
         toolbar.addWidget(self.context_label)
         toolbar.addStretch(1)
         toolbar.addWidget(self.save_status)
+        toolbar.addWidget(self.auto_map_button)
         toolbar.addWidget(self.reset_button)
         toolbar.addWidget(self.apply_button)
         outer.addLayout(toolbar)
+
+        self.auto_panel = QFrame()
+        self.auto_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        auto_layout = QHBoxLayout(self.auto_panel)
+        auto_layout.setContentsMargins(12, 8, 12, 8)
+        self.auto_progress = QLabel("Auto mapping is ready.")
+        self.auto_progress.setStyleSheet("font-weight: 700;")
+        self.auto_instruction = QLabel(
+            "The wizard uses deliberate joystick movement and never assigns the same axis twice."
+        )
+        self.auto_instruction.setWordWrap(True)
+        auto_layout.addWidget(self.auto_progress)
+        auto_layout.addWidget(self.auto_instruction, 1)
+        outer.addWidget(self.auto_panel)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -129,7 +149,9 @@ class MappingPage(QWidget):
         self.channel_badge = QLabel("")
         self.channel_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.channel_badge.setMinimumWidth(80)
-        self.channel_badge.setStyleSheet("padding: 5px 10px; border: 1px solid palette(mid); border-radius: 5px;")
+        self.channel_badge.setStyleSheet(
+            "padding: 5px 10px; border: 1px solid palette(mid); border-radius: 5px;"
+        )
         header_row.addWidget(self.channel_heading)
         header_row.addStretch(1)
         header_row.addWidget(self.channel_badge)
@@ -286,6 +308,7 @@ class MappingPage(QWidget):
         self._current_index = -1
         self._learning = False
         self._learn_baseline = None
+        self._cancel_auto_mapping("Auto mapping is ready.")
         self.save_status.setText("")
         self.context_label.setText(
             f"Profile: {profile.name}   •   Inputs: {axes} axes, {buttons} buttons, {hats} hats"
@@ -293,7 +316,7 @@ class MappingPage(QWidget):
 
         self.channel_list.blockSignals(True)
         self.channel_list.clear()
-        for index, mapping in enumerate(self._mappings):
+        for index, _mapping in enumerate(self._mappings):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, index)
             item.setSizeHint(QSize(230, 58))
@@ -301,8 +324,10 @@ class MappingPage(QWidget):
             self._refresh_channel_item(index)
         self.channel_list.blockSignals(False)
 
-        self.apply_button.setEnabled(bool(self._mappings))
-        self._set_editor_enabled(bool(self._mappings))
+        has_mappings = bool(self._mappings)
+        self.apply_button.setEnabled(has_mappings)
+        self.auto_map_button.setEnabled(has_mappings and axes >= 4 and len(self._mappings) >= 4)
+        self._set_editor_enabled(has_mappings)
         if self._mappings:
             selected = min(max(previous_channel, 0), len(self._mappings) - 1)
             self.channel_list.setCurrentRow(selected)
@@ -322,9 +347,28 @@ class MappingPage(QWidget):
     def update_input_state(self, state: dict[str, Any]) -> None:
         self._latest_input_state = state
         self._refresh_raw_input_label()
+
+        if self._auto_session is not None:
+            capture = self._auto_session.observe(state)
+            if capture is not None:
+                self._apply_auto_capture(capture)
+                if self._auto_session.complete:
+                    self.auto_progress.setText("Auto mapping complete")
+                    self.auto_instruction.setText(
+                        "Roll, Pitch, Throttle and Yaw were assigned. Check every live channel, then save changes."
+                    )
+                    self.auto_map_button.setText("Auto-map again")
+                    self._auto_session = None
+                else:
+                    step = self._auto_session.current_step
+                    self.auto_progress.setText(self._auto_session.progress_text)
+                    self.auto_instruction.setText(
+                        f"Captured Axis {capture.axis_index} for {capture.step.name}. "
+                        f"Release the control, then {step.prompt.lower()}."
+                    )
+
         if not self._learning or self._learn_baseline is None:
             return
-
         learned = self._detect_changed_source(self._learn_baseline, state)
         if learned is None:
             return
@@ -335,6 +379,75 @@ class MappingPage(QWidget):
         self.learn_button.setText("Learn Input")
         self.learn_status.setText(f"Detected: {description}")
         self._editor_changed()
+
+    def _toggle_auto_mapping(self) -> None:
+        if self._auto_session is not None:
+            self._cancel_auto_mapping("Auto mapping cancelled. Existing draft mappings were kept.")
+            return
+        if len(self._mappings) < 4:
+            QMessageBox.warning(self, "Not enough channels", "The active profile needs at least four channels.")
+            return
+        axes = self._latest_input_state.get("axes", [])
+        if not isinstance(axes, list) or len(axes) < 4:
+            QMessageBox.warning(
+                self,
+                "Joystick data unavailable",
+                "Select a joystick with at least four axes and move it once before starting auto mapping.",
+            )
+            return
+        session = AutoMappingSession()
+        try:
+            session.start(self._latest_input_state)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Auto mapping unavailable", str(exc))
+            return
+        self._learning = False
+        self._learn_baseline = None
+        self.learn_button.setText("Learn Input")
+        self._auto_session = session
+        self.auto_map_button.setText("Cancel auto-map")
+        self.auto_progress.setText(session.progress_text)
+        step = session.current_step
+        self.auto_instruction.setText(
+            f"Release all controls, wait briefly, then {step.prompt.lower()}."
+        )
+
+    def _cancel_auto_mapping(self, message: str) -> None:
+        if self._auto_session is not None:
+            self._auto_session.cancel()
+        self._auto_session = None
+        self.auto_map_button.setText("Auto-map Flight Controls")
+        self.auto_progress.setText(message)
+        self.auto_instruction.setText(
+            "The wizard uses deliberate joystick movement and never assigns the same axis twice."
+        )
+
+    def _apply_auto_capture(self, capture: AutoMapCapture) -> None:
+        index = capture.step.channel_index
+        if not 0 <= index < len(self._mappings):
+            return
+        current = self._mappings[index]
+        self._mappings[index] = replace(
+            current,
+            name=capture.step.name,
+            source_type="axis",
+            source_index=capture.axis_index,
+            hat_component="x",
+            constant_value=0.0,
+            mode=capture.step.mode,
+            reversed=capture.reversed,
+            minimum=1000,
+            center=1500,
+            maximum=2000,
+            failsafe=capture.step.failsafe,
+            trim=0,
+            expo=0.0,
+            smoothing=0.0,
+        )
+        self._refresh_channel_item(index)
+        if self._current_index == index:
+            self._load_editor(self._mappings[index])
+        self.save_status.setText("Unsaved auto-mapping")
 
     def _populate_sources(self, wanted: tuple[str, int, str, float] | None = None) -> None:
         self.source_combo.blockSignals(True)
@@ -529,6 +642,8 @@ class MappingPage(QWidget):
         if not self._latest_input_state:
             self.learn_status.setText("No joystick data yet. Move the joystick and try again.")
             return
+        if self._auto_session is not None:
+            self._cancel_auto_mapping("Auto mapping cancelled because single-channel learning started.")
         self._learning = True
         self._learn_baseline = {
             "axes": list(self._latest_input_state.get("axes", [])),
@@ -619,15 +734,22 @@ class MappingPage(QWidget):
 
     def _clear_editor(self) -> None:
         self._updating_editor = True
-        self.channel_heading.setText("No channel available")
+        self.channel_heading.setText("Select a channel")
         self.channel_badge.setText("")
         self.name_edit.clear()
         self.source_combo.clear()
-        self.live_value.setText("—")
-        self.raw_input_label.setText("Raw input: unavailable")
+        self.live_value.setText("1500 µs")
+        self.live_bar.setValue(1500)
+        self.raw_input_label.setText("Raw input: no channel selected")
         self._updating_editor = False
-        self._set_editor_enabled(False)
 
     def _emit_apply(self) -> None:
-        self._save_current_editor()
-        self.apply_requested.emit(self.mappings())
+        mappings = self.mappings()
+        errors: list[str] = []
+        for mapping in mappings:
+            errors.extend(f"CH{mapping.channel}: {error}" for error in mapping.validate())
+        if errors:
+            QMessageBox.warning(self, "Invalid channel mapping", "\n".join(errors[:12]))
+            return
+        self.apply_requested.emit(mappings)
+        self.save_status.setText("Saved")
