@@ -60,10 +60,15 @@ class DeviceHandlersMixin:
 
         if "simulat" in board or current == "simulator":
             return "simulator"
-        if "mega" in board or "atmega2560" in board:
-            return "arduino_mega"
-        if "uno" in board or "nano" in board or "atmega328" in board:
+
+        # Test ATmega328-class boards before Mega 2560. A broad `"mega" in
+        # board` check is incorrect because the word ATmega also appears in
+        # `Arduino UNO/Nano ATmega328P`.
+        if "arduino uno" in board or "arduino nano" in board or "atmega328" in board:
             return "arduino_uno"
+        if "arduino mega" in board or "mega 2560" in board or "atmega2560" in board:
+            return "arduino_mega"
+
         if "arduino" in board or "stream_only" in capabilities or "desktop_bridge" in mode:
             return "arduino"
         if "esp32" in board or "usb_hid_host" in capabilities or "profiles" in capabilities:
