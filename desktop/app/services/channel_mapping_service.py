@@ -138,7 +138,10 @@ class ChannelMapper:
                 axes = state.get("axes", [])
                 raw = float(axes[mapping.source_index])
                 if mapping.source_index < len(calibrations):
-                    return calibrations[mapping.source_index].normalize(raw)
+                    calibration = calibrations[mapping.source_index]
+                    if mapping.mode == "unipolar":
+                        return calibration.normalize_unipolar(raw)
+                    return calibration.normalize(raw)
                 return raw
 
             if mapping.source_type == "button":
@@ -168,7 +171,10 @@ def default_mappings(channel_count: int = 8) -> list[ChannelMapping]:
     names = ["Roll", "Pitch", "Throttle", "Yaw", "AUX1", "AUX2", "AUX3", "AUX4"]
     mappings: list[ChannelMapping] = []
     for index in range(channel_count):
-        mapping = ChannelMapping(channel=index + 1, name=names[index] if index < len(names) else f"CH{index + 1}")
+        mapping = ChannelMapping(
+            channel=index + 1,
+            name=names[index] if index < len(names) else f"CH{index + 1}",
+        )
         if index < 4:
             mapping.source_type = "axis"
             mapping.source_index = index
