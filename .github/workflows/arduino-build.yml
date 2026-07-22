@@ -4,23 +4,37 @@ on:
   push:
     paths:
       - "firmware/arduino-uno/**"
+      - "firmware/arduino-mega/**"
       - ".github/workflows/arduino-build.yml"
   pull_request:
     paths:
       - "firmware/arduino-uno/**"
+      - "firmware/arduino-mega/**"
+      - ".github/workflows/arduino-build.yml"
+  workflow_dispatch:
 
 jobs:
-  compile-uno:
+  compile:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: Arduino UNO
+            fqbn: arduino:avr:uno
+            sketch: firmware/arduino-uno/simjoy_arduino_bridge
+          - board: Arduino Mega 2560
+            fqbn: arduino:avr:mega
+            sketch: firmware/arduino-mega/simjoy_mega_bridge
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-arduino-cli@v2
-      - name: Install AVR core
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: "1.x"
+      - name: Install AVR platform
         run: |
           arduino-cli core update-index
           arduino-cli core install arduino:avr
-      - name: Compile Arduino UNO bridge
-        run: |
-          arduino-cli compile \
-            --fqbn arduino:avr:uno \
-            firmware/arduino-uno/simjoy_arduino_bridge
+      - name: Compile ${{ matrix.board }}
+        run: arduino-cli compile --fqbn "${{ matrix.fqbn }}" "${{ matrix.sketch }}"
