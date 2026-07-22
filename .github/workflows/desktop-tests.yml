@@ -8,6 +8,8 @@ on:
   pull_request:
     paths:
       - "desktop/**"
+      - ".github/workflows/desktop-tests.yml"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -29,5 +31,20 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet -r requirements-dev.txt
       - name: Test
+        shell: pwsh
         working-directory: desktop
-        run: python -m pytest -q --tb=short
+        run: |
+          python -m pytest -q --tb=short --junitxml="pytest-${{ matrix.python-version }}.xml" *> "pytest-${{ matrix.python-version }}.log"
+          $testExitCode = $LASTEXITCODE
+          Get-Content "pytest-${{ matrix.python-version }}.log"
+          exit $testExitCode
+      - name: Upload pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: |
+            desktop/pytest-${{ matrix.python-version }}.log
+            desktop/pytest-${{ matrix.python-version }}.xml
+          if-no-files-found: warn
+          retention-days: 7
