@@ -48,6 +48,8 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self._current_channels: list[int] = []
         self._auto_connect_attempted = False
         self._selected_profile_id: str | None = self.profile_collection.active_profile_id
+        self._adapter_kind = "disconnected"
+        self._adapter_capabilities: set[str] = set()
 
         self.dashboard_page = DashboardPage()
         self.joystick_page = JoystickPage()
