@@ -31,16 +31,11 @@ class ResolvedDeviceRoles:
 
 
 class DeviceRoleResolver:
-    """Bind stable profile roles to currently connected joystick devices.
-
-    Exact GUID bindings always win. An automatic binding uses device names and
-    unused-device preference so a traditional stick plus a separate throttle is
-    combined without relying on USB enumeration order.
-    """
+    """Bind stable profile roles to currently connected joystick devices."""
 
     THROTTLE_WORDS = ("throttle", "twcs", "quadrant", "lever")
     PEDAL_WORDS = ("pedal", "rudder")
-    STICK_WORDS = ("stick", "joystick", "hotas", "flight")
+    STICK_WORDS = ("stick", "joystick", "hotas", "flight", "t.16000")
 
     @classmethod
     def resolve(
@@ -64,7 +59,6 @@ class DeviceRoleResolver:
         infos: dict[str, JoystickInfo | None] = {}
         claimed: set[int] = set()
 
-        # Resolve explicit GUID bindings before automatic roles.
         for role in ROLE_ORDER:
             guid = normalized.get(role, AUTO_DEVICE_GUID)
             if guid == AUTO_DEVICE_GUID:
@@ -102,18 +96,25 @@ class DeviceRoleResolver:
             return None
 
         if role == "primary_stick":
-            if selected is not None and selected.axes >= 2:
+            named = cls._find_named(devices, cls.STICK_WORDS, claimed, exclude_words=cls.THROTTLE_WORDS + cls.PEDAL_WORDS)
+            if named is not None:
+                return named
+            if selected is not None and selected.axes >= 2 and not cls._name_has(selected, cls.THROTTLE_WORDS + cls.PEDAL_WORDS):
                 return selected
-            named = cls._find_named(devices, cls.STICK_WORDS, claimed)
-            return named or next((device for device in devices if device.axes >= 2), devices[0])
+            return next(
+                (
+                    device
+                    for device in devices
+                    if device.axes >= 2 and not cls._name_has(device, cls.THROTTLE_WORDS + cls.PEDAL_WORDS)
+                ),
+                devices[0],
+            )
 
         if role == "throttle":
             named = cls._find_named(devices, cls.THROTTLE_WORDS, claimed)
             if named is not None:
                 return named
             unused = next((device for device in devices if device.instance_id not in claimed and device.axes), None)
-            # A combined HOTAS or single flight stick may provide throttle on the
-            # same USB device, so falling back to the primary stick is intentional.
             return unused or selected or next((device for device in devices if device.axes), None)
 
         if role == "pedals":
@@ -121,14 +122,22 @@ class DeviceRoleResolver:
 
         return next((device for device in devices if device.instance_id not in claimed), None)
 
-    @staticmethod
+    @classmethod
     def _find_named(
+        cls,
         devices: list[JoystickInfo],
         words: tuple[str, ...],
         claimed: set[int],
+        exclude_words: tuple[str, ...] = (),
     ) -> JoystickInfo | None:
         for device in devices:
-            lowered = device.name.casefold()
-            if device.instance_id not in claimed and any(word in lowered for word in words):
+            if device.instance_id in claimed:
+                continue
+            if cls._name_has(device, words) and not cls._name_has(device, exclude_words):
                 return device
         return None
+
+    @staticmethod
+    def _name_has(device: JoystickInfo, words: tuple[str, ...]) -> bool:
+        lowered = device.name.casefold()
+        return any(word in lowered for word in words)
