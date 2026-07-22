@@ -10,12 +10,18 @@ from app.ui.device_handlers import DeviceHandlersMixin
 from app.ui.page_device import DevicePage
 
 
+# Keep one strong Python reference for the entire test module. Constructing a
+# QApplication in a helper and discarding the return value can destroy the Qt
+# application before the following QWidget is created on CPython/PySide6.
+_TEST_APPLICATION = QApplication.instance() or QApplication([])
+
+
 def application() -> QApplication:
-    return QApplication.instance() or QApplication([])
+    return _TEST_APPLICATION
 
 
 def test_uno_identity_hides_esp32_only_actions() -> None:
-    application()
+    app = application()
     page = DevicePage()
     page.set_connection(True, "COM8 @ 115200")
     assert "identifying" in page.adapter_status.text().casefold()
@@ -37,10 +43,12 @@ def test_uno_identity_hides_esp32_only_actions() -> None:
     assert page.bootloader_button.isHidden()
     assert page.handshake_button.isEnabled()
     assert page.reboot_button.isEnabled()
+    page.close()
+    assert app is not None
 
 
 def test_simulator_is_explicitly_a_test_target() -> None:
-    application()
+    app = application()
     page = DevicePage()
     page.set_connection(True, "Built-in ESP32-S3 simulator")
 
@@ -49,6 +57,8 @@ def test_simulator_is_explicitly_a_test_target() -> None:
     assert "no physical Arduino" in page.adapter_status.text()
     assert not page.upload_button.isHidden()
     assert page.bootloader_button.isHidden()
+    page.close()
+    assert app is not None
 
 
 def test_adapter_classification_distinguishes_boards() -> None:
