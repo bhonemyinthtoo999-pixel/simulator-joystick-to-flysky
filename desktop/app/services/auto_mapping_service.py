@@ -26,7 +26,7 @@ class AutoMapCapture:
 
 
 class AutoMappingSession:
-    """Identify AETR axes across any number of role-bound USB devices."""
+    """Identify AETR axes across one or more role-bound USB devices."""
 
     DEFAULT_STEPS = (
         AutoMapStep(0, "Roll", "Move the roll control fully RIGHT", "centered", 1500),
@@ -63,13 +63,14 @@ class AutoMappingSession:
 
     def start(
         self,
-        role_states: dict[str, dict[str, Any] | None],
+        states: dict[str, Any],
         now: float | None = None,
     ) -> None:
+        role_states = self._coerce_role_states(states)
         axes = self._all_axes(role_states)
         total_axes = sum(len(values) for values in axes.values())
         if total_axes < len(self.steps):
-            raise ValueError("At least four total axes across the bound devices are required for automatic AETR mapping.")
+            raise ValueError("At least four joystick axes across the bound devices are required for automatic AETR mapping.")
         self.step_index = 0
         self.used_axes.clear()
         self.active = True
@@ -82,11 +83,12 @@ class AutoMappingSession:
 
     def observe(
         self,
-        role_states: dict[str, dict[str, Any] | None],
+        states: dict[str, Any],
         now: float | None = None,
     ) -> AutoMapCapture | None:
         if not self.active or self.complete:
             return None
+        role_states = self._coerce_role_states(states)
         axes_by_role = self._all_axes(role_states)
         timestamp = time.monotonic() if now is None else float(now)
         if timestamp < self.armed_at:
@@ -132,6 +134,17 @@ class AutoMappingSession:
         timestamp = time.monotonic() if now is None else float(now)
         self.baseline = {role: list(values) for role, values in axes.items()}
         self.armed_at = timestamp + self.arm_delay_s
+
+    @staticmethod
+    def _coerce_role_states(states: dict[str, Any]) -> dict[str, dict[str, Any] | None]:
+        # Backward compatibility: older callers pass one snapshot directly.
+        if "axes" in states or "buttons" in states or "hats" in states:
+            return {"primary_stick": states}
+        return {
+            role: value if isinstance(value, dict) else None
+            for role, value in states.items()
+            if role in ROLE_ORDER
+        }
 
     @staticmethod
     def _all_axes(role_states: dict[str, dict[str, Any] | None]) -> dict[str, list[float]]:
