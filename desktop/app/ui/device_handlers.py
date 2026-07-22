@@ -33,18 +33,60 @@ class DeviceHandlersMixin:
             self.serial_service.connect_port(self.settings.last_port, self.settings.serial_baud)
 
     def _on_connection_changed(self, connected: bool, label: str) -> None:
+        if not connected:
+            self._adapter_kind = "disconnected"
+            self._adapter_capabilities = set()
+        elif "simulator" in label.casefold():
+            self._adapter_kind = "simulator"
+            self._adapter_capabilities = {"profiles", "desktop_stream", "diagnostics"}
+        else:
+            self._adapter_kind = "serial_unknown"
+            self._adapter_capabilities = set()
+
         self.device_page.set_connection(connected, label)
         self.dashboard_page.device_value.setText(label if connected else "Disconnected")
         self.diagnostics.info("Serial", f"{'Connected to' if connected else 'Disconnected from'} {label}")
+
+    @staticmethod
+    def _classify_adapter(payload: dict[str, Any], current: str = "serial_unknown") -> str:
+        board = str(payload.get("board", "")).casefold()
+        mode = str(payload.get("mode", "")).casefold()
+        raw_capabilities = payload.get("capabilities", [])
+        capabilities = {
+            str(value).casefold()
+            for value in raw_capabilities
+            if isinstance(raw_capabilities, (list, tuple, set))
+        }
+
+        if "simulat" in board or current == "simulator":
+            return "simulator"
+        if "mega" in board or "atmega2560" in board:
+            return "arduino_mega"
+        if "uno" in board or "nano" in board or "atmega328" in board:
+            return "arduino_uno"
+        if "arduino" in board or "stream_only" in capabilities or "desktop_bridge" in mode:
+            return "arduino"
+        if "esp32" in board or "usb_hid_host" in capabilities or "profiles" in capabilities:
+            return "esp32"
+        return current if current != "disconnected" else "serial_unknown"
+
+    def _record_adapter_identity(self, payload: dict[str, Any]) -> None:
+        raw_capabilities = payload.get("capabilities", [])
+        if isinstance(raw_capabilities, (list, tuple, set)):
+            self._adapter_capabilities.update(str(value).casefold() for value in raw_capabilities)
+        self._adapter_kind = self._classify_adapter(payload, self._adapter_kind)
+        self.device_page.set_adapter_identity(self._adapter_kind, payload)
 
     def _on_protocol_message(self, message_type: int, payload: dict[str, Any]) -> None:
         kind = MessageType(message_type)
         self.diagnostics.debug("Protocol", f"RX {kind.name}: {payload}")
         if kind == MessageType.HELLO_RESPONSE:
+            self._record_adapter_identity(payload)
             self.device_page.show_message("Handshake complete", payload)
-            self.dashboard_page.device_value.setText(str(payload.get("board", "ESP32-S3")))
+            self.dashboard_page.device_value.setText(str(payload.get("board", "Unknown adapter")))
             self.serial_service.send(MessageType.DEVICE_INFO, {})
         elif kind == MessageType.DEVICE_INFO:
+            self._record_adapter_identity(payload)
             self.device_page.show_message("Device information", payload)
         elif kind == MessageType.STATUS:
             self.device_page.show_message("Live device status", payload)
@@ -58,8 +100,18 @@ class DeviceHandlersMixin:
 
     def _upload_active_profile(self) -> None:
         if not self.serial_service.connected:
-            QMessageBox.warning(self, "Not connected", "Connect a serial device or the built-in ESP32-S3 simulator first.")
+            QMessageBox.warning(self, "Not connected", "Connect an adapter or the test simulator first.")
             return
+        if self._adapter_kind not in {"esp32", "simulator"}:
+            QMessageBox.information(
+                self,
+                "Arduino stream bridge",
+                "Arduino UNO/Nano and Mega bridges do not store profiles. The active desktop profile, "
+                "multi-device AETR mapping and calibration remain on the PC, and final live channels are "
+                "already streamed to the Arduino automatically.",
+            )
+            return
+
         active = self._active_profile()
         errors = active.validate()
         if errors:
@@ -75,7 +127,7 @@ class DeviceHandlersMixin:
         self.serial_service.send(MessageType.PROFILE_VALIDATE, payload)
         self.serial_service.send(MessageType.PROFILE_WRITE, payload)
         self.serial_service.send(MessageType.PROFILE_ACTIVATE, {"profile_id": active.profile_id})
-        self.diagnostics.info("Firmware", f"Upload requested for {active.name}")
+        self.diagnostics.info("Firmware", f"ESP32 profile upload requested for {active.name}")
 
     def _save_settings(self, payload: dict[str, Any]) -> None:
         for key, value in payload.items():
@@ -106,6 +158,7 @@ class DeviceHandlersMixin:
             "active_profile": self._active_profile().name,
             "selected_joystick": self._selected_info().name if self._selected_info() else "None",
             "serial_connected": self.serial_service.connected,
+            "adapter_kind": self._adapter_kind,
             "demo_enabled": self.settings.demo_joystick_enabled,
         }
         try:
