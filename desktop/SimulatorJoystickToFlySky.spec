@@ -1,17 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 
 pygame_binaries = collect_dynamic_libs("pygame")
 pygame_data = collect_data_files("pygame", include_py_files=False)
 pygame_hiddenimports = collect_submodules("pygame")
+application_data = [("assets/app_icon.svg", "assets")]
 
 analysis = Analysis(
     ["run_app.py"],
     pathex=["."],
     binaries=pygame_binaries,
-    datas=pygame_data,
+    datas=pygame_data + application_data,
     hiddenimports=pygame_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -29,6 +34,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="SimulatorJoystickToFlySky",
+    icon="assets/SimulatorJoystickToFlySky.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
