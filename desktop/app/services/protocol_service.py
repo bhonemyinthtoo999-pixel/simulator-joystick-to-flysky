@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 import json
 import struct
-from typing import Any
+from typing import Any, Iterable
 
 MAGIC = b"SJ"
 PROTOCOL_MAJOR = 1
@@ -32,6 +32,7 @@ class MessageType(IntEnum):
     ACK = 15
     ERROR = 16
     LOG = 17
+    LIVE_CHANNELS_FAST = 18
 
 
 @dataclass(frozen=True)
@@ -51,19 +52,63 @@ def crc16_ccitt(data: bytes, initial: int = 0xFFFF) -> int:
     for byte in data:
         crc ^= byte << 8
         for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+            crc = (
+                ((crc << 1) ^ 0x1021) & 0xFFFF
+                if crc & 0x8000
+                else (crc << 1) & 0xFFFF
+            )
     return crc
 
 
 class FrameCodec:
     @staticmethod
-    def encode(message_type: MessageType | int, sequence: int, payload: dict[str, Any] | None = None) -> bytes:
-        encoded = json.dumps(payload or {}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        if len(encoded) > MAX_PAYLOAD:
+    def _encode_payload(
+        message_type: MessageType | int,
+        sequence: int,
+        payload: bytes,
+    ) -> bytes:
+        if len(payload) > MAX_PAYLOAD:
             raise ProtocolError(f"payload exceeds {MAX_PAYLOAD} bytes")
-        header = _HEADER.pack(MAGIC, PROTOCOL_MAJOR, int(message_type), sequence & 0xFFFF, len(encoded))
-        crc = crc16_ccitt(header[2:] + encoded)
-        return header + encoded + _CRC.pack(crc)
+        header = _HEADER.pack(
+            MAGIC,
+            PROTOCOL_MAJOR,
+            int(message_type),
+            sequence & 0xFFFF,
+            len(payload),
+        )
+        crc = crc16_ccitt(header[2:] + payload)
+        return header + payload + _CRC.pack(crc)
+
+    @staticmethod
+    def encode(
+        message_type: MessageType | int,
+        sequence: int,
+        payload: dict[str, Any] | None = None,
+    ) -> bytes:
+        encoded = json.dumps(
+            payload or {},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return FrameCodec._encode_payload(message_type, sequence, encoded)
+
+    @staticmethod
+    def encode_fast_channels(
+        sequence: int,
+        channels: Iterable[int],
+    ) -> bytes:
+        values = [max(800, min(2200, int(value))) for value in channels]
+        if not 4 <= len(values) <= 16:
+            raise ProtocolError("fast channel packet requires 4..16 channels")
+        payload = bytes([len(values)]) + struct.pack(
+            f"<{len(values)}H",
+            *values,
+        )
+        return FrameCodec._encode_payload(
+            MessageType.LIVE_CHANNELS_FAST,
+            sequence,
+            payload,
+        )
 
     @staticmethod
     def decode(frame: bytes) -> ProtocolFrame:
@@ -83,16 +128,39 @@ class FrameCodec:
         if expected_crc != actual_crc:
             raise ProtocolError("CRC mismatch")
         try:
-            payload = json.loads(payload_bytes.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ProtocolError(f"invalid JSON payload: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ProtocolError("payload root must be an object")
-        try:
             kind = MessageType(message_type)
         except ValueError as exc:
             raise ProtocolError(f"unknown message type {message_type}") from exc
-        return ProtocolFrame(major=major, message_type=kind, sequence=sequence, payload=payload)
+
+        if kind == MessageType.LIVE_CHANNELS_FAST:
+            if not payload_bytes:
+                raise ProtocolError("fast channel payload is empty")
+            count = payload_bytes[0]
+            if not 4 <= count <= 16:
+                raise ProtocolError("fast channel count must be 4..16")
+            expected_payload_length = 1 + (count * 2)
+            if len(payload_bytes) != expected_payload_length:
+                raise ProtocolError("fast channel payload length mismatch")
+            channels = list(struct.unpack(f"<{count}H", payload_bytes[1:]))
+            payload: dict[str, Any] = {
+                "channels": channels,
+                "encoding": "u16le-v1",
+            }
+        else:
+            try:
+                decoded = json.loads(payload_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ProtocolError(f"invalid JSON payload: {exc}") from exc
+            if not isinstance(decoded, dict):
+                raise ProtocolError("payload root must be an object")
+            payload = decoded
+
+        return ProtocolFrame(
+            major=major,
+            message_type=kind,
+            sequence=sequence,
+            payload=payload,
+        )
 
 
 class FrameParser:
