@@ -17,6 +17,9 @@ if errorlevel 1 exit /b 1
 python -m pip install -r requirements-build.txt
 if errorlevel 1 exit /b 1
 
+python tools\build_icon.py
+if errorlevel 1 exit /b 1
+
 python -m pytest -q --tb=short
 if errorlevel 1 exit /b 1
 
@@ -29,5 +32,6 @@ if errorlevel 1 exit /b 1
 echo.
 echo Build complete.
 echo Application: dist\SimulatorJoystickToFlySky\SimulatorJoystickToFlySky.exe
+echo Icon: assets\SimulatorJoystickToFlySky.ico
 echo Keep the complete SimulatorJoystickToFlySky folder together when copying it.
 endlocal
