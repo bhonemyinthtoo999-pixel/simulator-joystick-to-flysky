@@ -5,9 +5,8 @@
  *   USB flight controls -> Windows desktop app -> USB serial -> UNO/Nano
  *   -> PPM on D9 -> FlySky trainer port
  *
- * The desktop performs multi-device calibration and channel mapping. This
- * firmware receives final RC pulse values and continuously generates PPM.
- * Safe PPM starts immediately at boot, even before the desktop connects.
+ * Safe PPM starts immediately at boot. Firmware 0.3.0 adds a compact binary
+ * live-channel message so the desktop can update D9 without large JSON frames.
  */
 
 #include <Arduino.h>
@@ -26,7 +25,7 @@ constexpr uint8_t PROTOCOL_MAJOR = 1;
 constexpr uint8_t MAGIC_0 = 'S';
 constexpr uint8_t MAGIC_1 = 'J';
 
-constexpr uint8_t PPM_OUTPUT_PIN = 9;       // ATmega328P PB1
+constexpr uint8_t PPM_OUTPUT_PIN = 9;           // ATmega328P PB1
 constexpr uint8_t HEARTBEAT_PIN = LED_BUILTIN;  // ATmega328P PB5 / D13
 constexpr uint8_t MAX_CHANNELS = 8;
 constexpr uint8_t DEFAULT_CHANNEL_COUNT = 8;
@@ -35,7 +34,6 @@ constexpr uint16_t PPM_PULSE_US = 400;
 constexpr bool PPM_IDLE_HIGH = true;
 
 constexpr uint32_t FAILSAFE_TIMEOUT_MS = 700;
-constexpr uint32_t STATUS_INTERVAL_MS = 1000;
 constexpr uint16_t CHANNEL_MIN_US = 800;
 constexpr uint16_t CHANNEL_MAX_US = 2200;
 constexpr size_t MAX_PAYLOAD = 384;
@@ -61,6 +59,7 @@ enum MessageType : uint8_t {
   MSG_ACK = 15,
   MSG_ERROR = 16,
   MSG_LOG = 17,
+  MSG_LIVE_CHANNELS_FAST = 18,
 };
 
 volatile uint16_t g_channels[MAX_CHANNELS];
@@ -73,7 +72,6 @@ volatile uint8_t g_heartbeat_divider = 0;
 
 bool g_stream_active = false;
 uint32_t g_last_valid_channels_ms = 0;
-uint32_t g_last_status_ms = 0;
 
 uint16_t crc16Update(uint16_t crc, uint8_t value) {
   crc ^= static_cast<uint16_t>(value) << 8;
@@ -96,7 +94,6 @@ uint16_t clampChannel(long value) {
 }
 
 inline void writePpmLevel(bool high) {
-  // Direct PB1 writes keep D9 edges deterministic inside the timer ISR.
   if (high) {
     PORTB |= _BV(PORTB1);
   } else {
@@ -136,6 +133,11 @@ void applyChannels(const uint16_t *values, uint8_t count) {
     g_channels[index] = values[index];
   }
   interrupts();
+}
+
+void markValidStream() {
+  g_last_valid_channels_ms = millis();
+  g_stream_active = true;
 }
 
 void applyFailsafe() {
@@ -249,18 +251,20 @@ void sendHello(uint16_t sequence) {
   sendFrame(
       MSG_HELLO_RESPONSE,
       sequence,
-      "{\"protocol_major\":1,\"protocol_minor\":0,\"firmware_version\":\"0.2.0-arduino-uno\"," 
-      "\"board\":\"Arduino UNO/Nano ATmega328P\",\"hardware_revision\":\"bridge-d9-v2\"," 
-      "\"capabilities\":[\"ppm\",\"desktop_stream\",\"failsafe\",\"stream_only\",\"ppm_engine_status\"]}");
+      "{\"protocol_major\":1,\"protocol_minor\":0,\"firmware_version\":\"0.3.0-arduino-uno\","
+      "\"board\":\"Arduino UNO/Nano ATmega328P\",\"hardware_revision\":\"bridge-d9-v3\","
+      "\"capabilities\":[\"ppm\",\"desktop_stream\",\"failsafe\",\"stream_only\","
+      "\"ppm_engine_status\",\"fast_channels_v1\"]}");
 }
 
 void sendDeviceInfo(uint16_t sequence) {
   sendFrame(
       MSG_DEVICE_INFO,
       sequence,
-      "{\"board\":\"Arduino UNO/Nano ATmega328P\",\"firmware_version\":\"0.2.0-arduino-uno\"," 
-      "\"ppm_gpio\":9,\"ppm_frame_us\":22500,\"ppm_pulse_us\":400,\"ppm_idle_high\":true," 
-      "\"mode\":\"desktop_bridge\",\"persistent_profiles\":false}");
+      "{\"board\":\"Arduino UNO/Nano ATmega328P\",\"firmware_version\":\"0.3.0-arduino-uno\","
+      "\"ppm_gpio\":9,\"ppm_frame_us\":22500,\"ppm_pulse_us\":400,\"ppm_idle_high\":true,"
+      "\"live_channel_encoding\":\"u16le-v1\",\"mode\":\"desktop_bridge\","
+      "\"persistent_profiles\":false}");
 }
 
 void sendAck(uint16_t sequence, const char *request) {
@@ -308,9 +312,9 @@ void sendStatus(uint16_t sequence) {
   int used = snprintf(
       json,
       sizeof(json),
-      "{\"uptime_ms\":%lu,\"stream_active\":%s,\"joystick_connected\":%s," 
-      "\"failsafe_active\":%s,\"stream_age_ms\":%lu,\"ppm_active\":%s," 
-      "\"ppm_gpio\":9,\"ppm_frame_count\":%lu,\"ppm_frame_us\":22500," 
+      "{\"uptime_ms\":%lu,\"stream_active\":%s,\"joystick_connected\":%s,"
+      "\"failsafe_active\":%s,\"stream_age_ms\":%lu,\"ppm_active\":%s,"
+      "\"ppm_gpio\":9,\"ppm_frame_count\":%lu,\"ppm_frame_us\":22500,"
       "\"ppm_pulse_us\":400,\"ppm_idle_high\":true,\"channels\":[",
       static_cast<unsigned long>(now),
       g_stream_active ? "true" : "false",
@@ -331,7 +335,8 @@ void sendStatus(uint16_t sequence) {
         "%s%u",
         index ? "," : "",
         snapshot[index]);
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(json) - static_cast<size_t>(used)) {
+    if (written < 0 ||
+        static_cast<size_t>(written) >= sizeof(json) - static_cast<size_t>(used)) {
       return;
     }
     used += written;
@@ -390,6 +395,33 @@ bool parseChannelArray(char *payload, uint16_t *values, uint8_t &count) {
   return count >= 4;
 }
 
+bool parseFastChannels(
+    const uint8_t *payload,
+    uint16_t payload_length,
+    uint16_t *values,
+    uint8_t &count) {
+  if (!payload || !values || payload_length < 1) {
+    return false;
+  }
+
+  count = payload[0];
+  if (count < 4 || count > MAX_CHANNELS) {
+    return false;
+  }
+  if (payload_length != static_cast<uint16_t>(1U + (count * 2U))) {
+    return false;
+  }
+
+  for (uint8_t index = 0; index < count; ++index) {
+    const uint8_t low = payload[1U + (index * 2U)];
+    const uint8_t high = payload[2U + (index * 2U)];
+    values[index] = clampChannel(
+        static_cast<uint16_t>(low) |
+        (static_cast<uint16_t>(high) << 8U));
+  }
+  return true;
+}
+
 void rebootBoard() {
   Serial.flush();
   delay(30);
@@ -398,7 +430,12 @@ void rebootBoard() {
   }
 }
 
-void handleFrame(uint8_t major, uint8_t type, uint16_t sequence, char *payload) {
+void handleFrame(
+    uint8_t major,
+    uint8_t type,
+    uint16_t sequence,
+    char *payload,
+    uint16_t payload_length) {
   if (major != PROTOCOL_MAJOR) {
     sendError(sequence, "PROTOCOL", "protocol major mismatch");
     return;
@@ -412,6 +449,8 @@ void handleFrame(uint8_t major, uint8_t type, uint16_t sequence, char *payload) 
       sendDeviceInfo(sequence);
       break;
     case MSG_STATUS:
+      // Status is request-driven. Avoid unsolicited large JSON telemetry while
+      // realtime channel streaming is active.
       sendStatus(sequence);
       break;
     case MSG_LIVE_CHANNELS: {
@@ -422,8 +461,22 @@ void handleFrame(uint8_t major, uint8_t type, uint16_t sequence, char *payload) 
         break;
       }
       applyChannels(values, count);
-      g_last_valid_channels_ms = millis();
-      g_stream_active = true;
+      markValidStream();
+      break;
+    }
+    case MSG_LIVE_CHANNELS_FAST: {
+      uint16_t values[MAX_CHANNELS];
+      uint8_t count = 0;
+      if (!parseFastChannels(
+              reinterpret_cast<const uint8_t *>(payload),
+              payload_length,
+              values,
+              count)) {
+        sendError(sequence, "LIVE_CHANNELS_FAST", "invalid binary channel payload");
+        break;
+      }
+      applyChannels(values, count);
+      markValidStream();
       break;
     }
     case MSG_PROFILE_VALIDATE:
@@ -538,7 +591,12 @@ void feedParser(uint8_t value) {
       if (g_parser.received_crc == g_parser.calculated_crc) {
         const uint16_t sequence = static_cast<uint16_t>(g_parser.header[2]) |
                                   (static_cast<uint16_t>(g_parser.header[3]) << 8U);
-        handleFrame(g_parser.header[0], g_parser.header[1], sequence, g_parser.payload);
+        handleFrame(
+            g_parser.header[0],
+            g_parser.header[1],
+            sequence,
+            g_parser.payload,
+            g_parser.payload_length);
       }
       resetParser();
       break;
@@ -585,10 +643,8 @@ void loop() {
     applyFailsafe();
   }
 
-  if (static_cast<uint32_t>(now - g_last_status_ms) >= STATUS_INTERVAL_MS) {
-    g_last_status_ms = now;
-    sendStatus(0);
-  }
-
+  // Do not emit periodic verbose status packets. On an ATmega328P the 64-byte
+  // serial TX buffer can otherwise block input parsing long enough to create
+  // visible control jitter. The desktop requests STATUS only when needed.
   delay(1);
 }
