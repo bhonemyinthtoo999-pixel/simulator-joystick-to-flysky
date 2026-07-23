@@ -1,6 +1,6 @@
 from .page_calibration import CalibrationPage
 from .page_dashboard import DashboardPage
-from .page_device import DevicePage
+from .page_device_safe import DevicePage
 from .page_diagnostics import DiagnosticsPage
 from .page_joystick import JoystickPage
 from .page_mapping_device_editor import MappingPage
