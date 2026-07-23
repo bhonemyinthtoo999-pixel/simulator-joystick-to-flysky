@@ -42,7 +42,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from .icon_resources import application_icon
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.8.1"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "ready-to-use-setup-wizard-readiness-dashboard-one-click-firmware",
+        "ready-to-use-live-hardware-transmitter-monitor-simulator-safety",
     )
 
     def show_unhandled_exception(
