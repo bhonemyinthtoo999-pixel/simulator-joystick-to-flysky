@@ -25,9 +25,10 @@ INPUT_BACKEND_MODE = _configure_windows_joystick_backend()
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from .icon_resources import application_icon
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.7.1"
 
 
 def main() -> int:
@@ -43,12 +44,16 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Simulator Joystick to FlySky")
+    app.setApplicationDisplayName("Simulator Joystick to FlySky")
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("Simulator Joystick to FlySky")
+    icon = application_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "windows-portable-exe-low-latency-multi-device-aetr",
+        "windows-portable-exe-logo-safe-application-icon",
     )
 
     def show_unhandled_exception(
@@ -61,6 +66,8 @@ def main() -> int:
 
     sys.excepthook = show_unhandled_exception
     window = MainWindow()
+    if not icon.isNull():
+        window.setWindowIcon(icon)
     window.show()
     return app.exec()
 
