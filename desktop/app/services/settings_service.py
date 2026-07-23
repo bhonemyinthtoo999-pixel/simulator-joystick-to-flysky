@@ -16,6 +16,8 @@ class AppSettings:
     auto_detect_adapter: bool = True
     last_port: str = ""
     log_level: str = "INFO"
+    setup_completed: bool = False
+    setup_revision: int = 0
 
     def validate(self) -> None:
         self.channel_rate_hz = max(10, min(60, int(self.channel_rate_hz)))
@@ -36,6 +38,8 @@ class AppSettings:
         self.auto_detect_adapter = bool(self.auto_detect_adapter)
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             self.log_level = "INFO"
+        self.setup_completed = bool(self.setup_completed)
+        self.setup_revision = max(0, int(self.setup_revision))
 
 
 class SettingsStore:
