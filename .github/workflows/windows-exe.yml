@@ -113,5 +113,6 @@ jobs:
               sha: context.sha,
               state: passed ? 'success' : 'failure',
               context: 'windows-exe/build',
-              description: passed ? 'Windows EXE package built' : 'Windows EXE build failed'
+              description: passed ? 'Windows EXE package built' : 'Windows EXE build failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
