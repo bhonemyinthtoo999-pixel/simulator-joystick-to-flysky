@@ -44,6 +44,13 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet -r requirements-build.txt
 
+      - name: Generate multi-size application icon
+        working-directory: desktop
+        run: |
+          python tools/build_icon.py
+          if (-not (Test-Path "assets/SimulatorJoystickToFlySky.ico")) { throw "ICO file was not generated" }
+          if ((Get-Item "assets/SimulatorJoystickToFlySky.ico").Length -lt 1024) { throw "Generated ICO is unexpectedly small" }
+
       - name: Run desktop tests
         working-directory: desktop
         run: python -m pytest -q --tb=short
@@ -72,6 +79,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item "desktop\dist\SimulatorJoystickToFlySky\*" $packageDir -Recurse -Force
           Copy-Item "desktop\README.md" (Join-Path $packageDir "README.md") -Force
+          Copy-Item "desktop\assets\SimulatorJoystickToFlySky.png" (Join-Path $packageDir "APP-ICON.png") -Force
           New-Item -ItemType Directory -Force -Path (Join-Path $packageDir "firmware") | Out-Null
           Copy-Item "firmware\arduino-uno" (Join-Path $packageDir "firmware\arduino-uno") -Recurse -Force
           Copy-Item "firmware\arduino-mega" (Join-Path $packageDir "firmware\arduino-mega") -Recurse -Force
@@ -113,6 +121,6 @@ jobs:
               sha: context.sha,
               state: passed ? 'success' : 'failure',
               context: 'windows-exe/build',
-              description: passed ? 'Windows EXE package built' : 'Windows EXE build failed',
+              description: passed ? 'Windows EXE package built with app icon' : 'Windows EXE build failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
