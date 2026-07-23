@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ..services.readiness_service import ReadinessReport
 from .page_common import clear_layout
+from .transmitter_monitor import LiveTransmitterMonitor
 
 
 class DashboardPage(QWidget):
@@ -115,6 +116,8 @@ class DashboardPage(QWidget):
         status_row.addWidget(joystick_card)
         status_row.addWidget(profile_card)
 
+        self.transmitter_monitor = LiveTransmitterMonitor()
+
         checklist_header = QLabel("Setup checklist")
         checklist_header.setStyleSheet("font-size: 18px; font-weight: 650;")
         self.checklist_container = QWidget()
@@ -144,6 +147,7 @@ class DashboardPage(QWidget):
         layout.addWidget(self.subtitle)
         layout.addWidget(self.hero)
         layout.addLayout(status_row)
+        layout.addWidget(self.transmitter_monitor)
         layout.addWidget(checklist_header)
         layout.addWidget(self.checklist_container)
         layout.addWidget(channel_header)
@@ -245,6 +249,8 @@ class DashboardPage(QWidget):
         board: str = "",
         connection: str = "",
     ) -> None:
+        """Show the actual connected adapter instead of an ESP32 placeholder."""
+
         clean_board = board.strip()
         clean_connection = connection.strip()
 
@@ -287,6 +293,23 @@ class DashboardPage(QWidget):
         self.device_heading.setText(heading.upper())
         self.device_value.setText(value)
         self.device_detail.setText(detail)
+
+    def update_transmitter(
+        self,
+        channels: list[int],
+        *,
+        adapter_kind: str,
+        connection: str,
+        streaming: bool,
+        failsafe: bool,
+    ) -> None:
+        self.transmitter_monitor.update_live(
+            channels,
+            adapter_kind=adapter_kind,
+            connection=connection,
+            streaming=streaming,
+            failsafe=failsafe,
+        )
 
     def set_channels(self, channels: list[int]) -> None:
         clear_layout(self.channel_layout)
