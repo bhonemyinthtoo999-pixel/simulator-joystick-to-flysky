@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
@@ -14,6 +16,9 @@ application_data = [
     ("assets/app_icon.svg", "assets"),
     ("assets/SimulatorJoystickToFlySky.png", "assets"),
 ]
+firmware_assets = Path("assets/firmware")
+if firmware_assets.exists():
+    application_data.append((str(firmware_assets), "assets/firmware"))
 
 analysis = Analysis(
     ["run_app.py"],
