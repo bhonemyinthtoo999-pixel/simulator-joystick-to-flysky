@@ -197,11 +197,13 @@ class MainWindow(
         self.profiles_page.export_requested.connect(self._export_profile)
 
         self.device_page.refresh_requested.connect(
-            self.serial_service.force_scan_ports
+            self._refresh_adapter_ports
         )
         self.device_page.connect_requested.connect(self._connect_serial)
         self.device_page.simulator_requested.connect(self._connect_simulator)
-        self.device_page.disconnect_requested.connect(self._disconnect_serial)
+        self.device_page.disconnect_requested.connect(
+            self._disconnect_and_rescan
+        )
         self.device_page.hello_requested.connect(
             self.serial_service.request_hello
         )
@@ -249,6 +251,16 @@ class MainWindow(
             self._export_diagnostics
         )
         self.settings_page.save_requested.connect(self._save_settings)
+
+    def _refresh_adapter_ports(self) -> None:
+        self._adapter_probe_signature = None
+        self.serial_service.force_scan_ports()
+
+    def _disconnect_and_rescan(self) -> None:
+        self._disconnect_serial()
+        self._adapter_probe_signature = None
+        if self.settings.auto_detect_adapter:
+            QTimer.singleShot(120, self.serial_service.force_scan_ports)
 
     def closeEvent(self, event: Any) -> None:
         self._cancel_adapter_probe()
