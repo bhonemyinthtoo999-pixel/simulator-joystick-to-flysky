@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+import time
 from typing import Any
 
 from PySide6.QtCore import QTimer
@@ -34,14 +35,16 @@ class DeviceHandlersMixin:
             self.serial_service.connect_port(self.settings.last_port, self.settings.serial_baud)
 
     def _on_connection_changed(self, connected: bool, label: str) -> None:
+        self._failsafe_test_generation = getattr(self, "_failsafe_test_generation", 0) + 1
         self._stream_paused_for_test = False
         self._failsafe_test_active = False
+        self._failsafe_verify_after = 0.0
         if not connected:
             self._adapter_kind = "disconnected"
             self._adapter_capabilities = set()
         elif "simulator" in label.casefold():
             self._adapter_kind = "simulator"
-            self._adapter_capabilities = {"profiles", "desktop_stream", "diagnostics"}
+            self._adapter_capabilities = {"profiles", "desktop_stream", "diagnostics", "failsafe"}
         else:
             self._adapter_kind = "serial_unknown"
             self._adapter_capabilities = set()
@@ -94,7 +97,10 @@ class DeviceHandlersMixin:
         elif kind == MessageType.STATUS:
             self.device_page.update_adapter_status(payload)
             self.device_page.show_message("Live device status", payload)
-            if self._failsafe_test_active:
+            if (
+                self._failsafe_test_active
+                and time.monotonic() >= getattr(self, "_failsafe_verify_after", 0.0)
+            ):
                 self._finish_failsafe_test(payload)
         elif kind == MessageType.ACK:
             self.device_page.show_message("Command acknowledged", payload)
@@ -105,45 +111,44 @@ class DeviceHandlersMixin:
             self.diagnostics.info("Firmware", str(payload.get("message", payload)))
 
     def _start_failsafe_test(self) -> None:
-        if self._adapter_kind not in {"arduino_uno", "arduino_mega", "arduino"}:
+        supported = {"arduino_uno", "arduino_mega", "arduino", "simulator"}
+        if self._adapter_kind not in supported:
             QMessageBox.information(
                 self,
-                "Arduino required",
-                "Connect and identify an Arduino UNO/Nano or Mega bridge before running this test.",
+                "Compatible adapter required",
+                "Connect and identify an Arduino UNO/Nano or Mega bridge, or use the built-in simulator.",
             )
             return
         if not self.serial_service.connected:
-            QMessageBox.warning(self, "Not connected", "Connect the Arduino serial port first.")
+            QMessageBox.warning(self, "Not connected", "Connect the serial adapter first.")
             return
-        answer = QMessageBox.warning(
-            self,
-            "Safety confirmation",
-            "Remove propellers and disconnect motor power before continuing.\n\n"
-            "The desktop will pause channel streaming for about one second so the Arduino communication failsafe activates.",
-            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Ok:
+        if self._failsafe_test_active:
             return
 
+        self._failsafe_test_generation = getattr(self, "_failsafe_test_generation", 0) + 1
+        generation = self._failsafe_test_generation
         self._failsafe_test_active = True
         self._stream_paused_for_test = True
+        self._failsafe_verify_after = time.monotonic() + 0.82
+        expected = [1500, 1500, 1000, 1500]
         self.device_page.set_failsafe_test_state(
             "waiting",
-            "Stream paused. Waiting longer than the Arduino 700 ms communication timeout…",
-            35,
+            "Desktop channel streaming is paused. Waiting beyond the firmware 700 ms communication timeout…",
+            38,
+            expected,
         )
-        self.diagnostics.info("Failsafe test", "LIVE_CHANNELS paused for Arduino timeout verification")
-        QTimer.singleShot(850, self._request_failsafe_status)
-        QTimer.singleShot(2200, self._failsafe_test_timeout)
+        self.diagnostics.info("Failsafe test", "LIVE_CHANNELS paused for firmware timeout verification")
+        QTimer.singleShot(900, lambda token=generation: self._request_failsafe_status(token))
+        QTimer.singleShot(2500, lambda token=generation: self._failsafe_test_timeout(token))
 
-    def _request_failsafe_status(self) -> None:
-        if not self._failsafe_test_active:
+    def _request_failsafe_status(self, generation: int) -> None:
+        if not self._failsafe_test_active or generation != self._failsafe_test_generation:
             return
         self.device_page.set_failsafe_test_state(
             "verifying",
-            "Timeout elapsed. Reading Arduino channels and comparing the safe AETR values…",
-            72,
+            "Communication timeout elapsed. Reading firmware channels and checking the safe AETR values…",
+            76,
+            [1500, 1500, 1000, 1500],
         )
         self.serial_service.send(MessageType.STATUS, {})
 
@@ -157,33 +162,68 @@ class DeviceHandlersMixin:
             except (TypeError, ValueError):
                 received = []
 
+        explicit_failsafe = payload.get("failsafe_active")
+        stream_active = bool(payload.get("stream_active", payload.get("joystick_connected", False)))
+        safe_values_match = len(received) == 4 and all(
+            abs(received[index] - expected[index]) <= 5 for index in range(4)
+        )
+        state_agrees = explicit_failsafe is not False and not stream_active
+        passed = safe_values_match and state_agrees
+
         self._failsafe_test_active = False
         self._stream_paused_for_test = False
-        passed = len(received) == 4 and all(abs(received[i] - expected[i]) <= 5 for i in range(4))
+        self._failsafe_verify_after = 0.0
         if passed:
             self.device_page.set_failsafe_test_state(
                 "pass",
-                "PASS — Arduino communication failsafe verified. Normal live streaming has resumed.",
+                "PASS — firmware communication failsafe verified. Normal live channel streaming has resumed.",
                 100,
+                expected,
+                received,
             )
-            self.diagnostics.info("Failsafe test", f"PASS: Arduino returned {received}")
+            self.diagnostics.info("Failsafe test", f"PASS: firmware returned {received}")
         else:
+            reason = (
+                f"expected {expected}, received {received or 'no valid channel array'}, "
+                f"stream_active={stream_active}, failsafe_active={explicit_failsafe}"
+            )
             self.device_page.set_failsafe_test_state(
                 "fail",
-                f"FAIL — expected {expected}, received {received or 'no valid channel array'}. Normal streaming has resumed.",
+                f"FAIL — {reason}. Normal live channel streaming has resumed.",
                 100,
+                expected,
+                received,
             )
-            self.diagnostics.error("Failsafe test", f"FAIL: expected {expected}, received {received}")
+            self.diagnostics.error("Failsafe test", reason)
 
-    def _failsafe_test_timeout(self) -> None:
-        if not self._failsafe_test_active:
+        QTimer.singleShot(300, lambda: self.serial_service.send(MessageType.STATUS, {}))
+
+    def _abort_failsafe_test(self) -> None:
+        if not self._failsafe_test_active and not self._stream_paused_for_test:
+            return
+        self._failsafe_test_generation = getattr(self, "_failsafe_test_generation", 0) + 1
+        self._failsafe_test_active = False
+        self._stream_paused_for_test = False
+        self._failsafe_verify_after = 0.0
+        self.device_page.set_failsafe_test_state(
+            "aborted",
+            "Test aborted. Normal live channel streaming has been restored.",
+            0,
+            [1500, 1500, 1000, 1500],
+        )
+        self.diagnostics.info("Failsafe test", "Test aborted and LIVE_CHANNELS restored")
+
+    def _failsafe_test_timeout(self, generation: int) -> None:
+        if not self._failsafe_test_active or generation != self._failsafe_test_generation:
             return
         self._failsafe_test_active = False
         self._stream_paused_for_test = False
+        self._failsafe_verify_after = 0.0
         self.device_page.set_failsafe_test_state(
             "fail",
-            "FAIL — no Arduino status response was received. Normal live streaming has resumed.",
+            "FAIL — no firmware status response was received. Normal live channel streaming has resumed.",
             100,
+            [1500, 1500, 1000, 1500],
         )
         self.diagnostics.error("Failsafe test", "No status response before timeout")
 
@@ -240,7 +280,12 @@ class DeviceHandlersMixin:
             self.channel_timer.setInterval(interval)
 
     def _export_diagnostics(self) -> None:
-        filename, _ = QFileDialog.getSaveFileName(self, "Export diagnostics", "simjoy-diagnostics.txt", "Text files (*.txt)")
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export diagnostics",
+            "simjoy-diagnostics.txt",
+            "Text files (*.txt)",
+        )
         if not filename:
             return
         context = {
@@ -249,6 +294,7 @@ class DeviceHandlersMixin:
             "serial_connected": self.serial_service.connected,
             "adapter_kind": self._adapter_kind,
             "demo_enabled": self.settings.demo_joystick_enabled,
+            "failsafe_test_active": self._failsafe_test_active,
         }
         try:
             self.diagnostics.export(Path(filename), context)
