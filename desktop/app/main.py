@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.6.1"
 
 
 def main() -> int:
@@ -38,7 +38,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "low-latency-realtime-output-fast-binary-uno-d9",
+        "low-latency-visible-adapter-status-and-command-responses",
     )
 
     def show_unhandled_exception(
