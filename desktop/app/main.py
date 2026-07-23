@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 import traceback
@@ -19,6 +20,19 @@ def _configure_windows_joystick_backend() -> str:
         os.environ["SDL_JOYSTICK_WGI"] = "0"
         os.environ["SDL_JOYSTICK_RAWINPUT"] = "0"
     return mode
+
+
+def _set_windows_app_user_model_id() -> None:
+    """Keep the packaged EXE icon grouped correctly on the Windows taskbar."""
+
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "BhoneMyintHtoo.SimulatorJoystickToFlySky"
+        )
+    except (AttributeError, OSError):
+        pass
 
 
 INPUT_BACKEND_MODE = _configure_windows_joystick_backend()
@@ -42,6 +56,7 @@ def main() -> int:
             sys.stdout.write(APP_VERSION + "\n")
         return 0
 
+    _set_windows_app_user_model_id()
     app = QApplication(sys.argv)
     app.setApplicationName("Simulator Joystick to FlySky")
     app.setApplicationDisplayName("Simulator Joystick to FlySky")
