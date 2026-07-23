@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
@@ -65,7 +65,8 @@ class MainWindow(
         self.diagnostics = DiagnosticsService()
         self.serial_service = SerialService(self.settings.serial_baud)
         self.joystick_service = JoystickService(
-            demo_enabled=self.settings.demo_joystick_enabled
+            poll_interval_ms=5 if self.settings.low_latency_mode else 20,
+            demo_enabled=self.settings.demo_joystick_enabled,
         )
 
         self._device_infos: dict[int, JoystickInfo] = {}
@@ -73,6 +74,9 @@ class MainWindow(
         self._latest_states: dict[int, dict[str, Any]] = {}
         self._calibration_session: CalibrationSession | None = None
         self._current_channels: list[int] = []
+        self._last_sent_channels: list[int] = []
+        self._last_realtime_send_at = 0.0
+        self._last_input_ui_at = 0.0
         self._auto_connect_attempted = False
         self._selected_profile_id: str | None = (
             self.profile_collection.active_profile_id
@@ -138,16 +142,24 @@ class MainWindow(
         self._wire_signals()
         self._refresh_profiles()
 
+        # This timer is intentionally UI-only. Realtime mapping and serial output
+        # are driven by fresh joystick snapshots in InputHandlersMixin.
         self.channel_timer = QTimer(self)
+        self.channel_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.channel_timer.timeout.connect(self._channel_tick)
         self._apply_channel_rate()
         self.channel_timer.start()
 
         self.serial_service.start()
         self.joystick_service.start()
+        self.diagnostics.info("Application", "Desktop application started")
         self.diagnostics.info(
-            "Application",
-            "Desktop application started",
+            "Realtime",
+            (
+                f"Low-latency mode active: {self.settings.realtime_rate_hz} Hz output limit"
+                if self.settings.low_latency_mode
+                else f"Standard output mode: {self.settings.realtime_rate_hz} Hz limit"
+            ),
         )
         self.diagnostics.info(
             "Demo",
@@ -156,36 +168,24 @@ class MainWindow(
         )
 
     def _wire_signals(self) -> None:
-        self.joystick_service.devices_changed.connect(
-            self._on_devices_changed
-        )
+        self.joystick_service.devices_changed.connect(self._on_devices_changed)
         self.joystick_service.state_changed.connect(self._on_state_changed)
         self.joystick_service.backend_error.connect(
             lambda message: self._transport_error("Joystick", message)
         )
         self.joystick_page.device_selected.connect(self._select_device)
 
-        self.calibration_page.start_requested.connect(
-            self._start_calibration
-        )
-        self.calibration_page.center_requested.connect(
-            self._capture_center
-        )
-        self.calibration_page.save_requested.connect(
-            self._save_calibration
-        )
-        self.calibration_page.reset_requested.connect(
-            self._reset_calibration
-        )
+        self.calibration_page.start_requested.connect(self._start_calibration)
+        self.calibration_page.center_requested.connect(self._capture_center)
+        self.calibration_page.save_requested.connect(self._save_calibration)
+        self.calibration_page.reset_requested.connect(self._reset_calibration)
 
         self.mapping_page.apply_requested.connect(self._save_mappings)
         self.mapping_page.reset_requested.connect(self._reset_mappings)
 
         self.profiles_page.profile_selected.connect(self._profile_selected)
         self.profiles_page.create_requested.connect(self._create_profile)
-        self.profiles_page.duplicate_requested.connect(
-            self._duplicate_profile
-        )
+        self.profiles_page.duplicate_requested.connect(self._duplicate_profile)
         self.profiles_page.delete_requested.connect(self._delete_profile)
         self.profiles_page.activate_requested.connect(
             self._activate_selected_profile
@@ -196,23 +196,15 @@ class MainWindow(
         self.profiles_page.import_requested.connect(self._import_profile)
         self.profiles_page.export_requested.connect(self._export_profile)
 
-        self.device_page.refresh_requested.connect(
-            self._refresh_adapter_ports
-        )
+        self.device_page.refresh_requested.connect(self._refresh_adapter_ports)
         self.device_page.connect_requested.connect(self._connect_serial)
         self.device_page.simulator_requested.connect(self._connect_simulator)
-        self.device_page.disconnect_requested.connect(
-            self._disconnect_and_rescan
-        )
-        self.device_page.hello_requested.connect(
-            self.serial_service.request_hello
-        )
+        self.device_page.disconnect_requested.connect(self._disconnect_and_rescan)
+        self.device_page.hello_requested.connect(self.serial_service.request_hello)
         self.device_page.status_requested.connect(
             lambda: self.serial_service.send(MessageType.STATUS, {})
         )
-        self.device_page.upload_requested.connect(
-            self._upload_active_profile
-        )
+        self.device_page.upload_requested.connect(self._upload_active_profile)
         self.device_page.reboot_requested.connect(
             lambda: self.serial_service.send(MessageType.REBOOT, {})
         )
@@ -230,9 +222,7 @@ class MainWindow(
         self.serial_service.connection_changed.connect(
             self._on_connection_changed
         )
-        self.serial_service.message_received.connect(
-            self._on_protocol_message
-        )
+        self.serial_service.message_received.connect(self._on_protocol_message)
         self.serial_service.transport_error.connect(
             lambda message: self._transport_error("Serial", message)
         )
@@ -240,13 +230,9 @@ class MainWindow(
             self.diagnostics_page.set_stats
         )
 
-        self.diagnostics.entry_added.connect(
-            self.diagnostics_page.add_entry
-        )
+        self.diagnostics.entry_added.connect(self.diagnostics_page.add_entry)
         self.diagnostics.cleared.connect(self.diagnostics_page.clear)
-        self.diagnostics_page.clear_requested.connect(
-            self.diagnostics.clear
-        )
+        self.diagnostics_page.clear_requested.connect(self.diagnostics.clear)
         self.diagnostics_page.export_requested.connect(
             self._export_diagnostics
         )
