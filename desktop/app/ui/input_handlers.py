@@ -191,6 +191,16 @@ class InputHandlersMixin:
         if self.pages.currentWidget() is self.device_page:
             self.device_page.update_desktop_channels(channels, streaming)
 
+        # The transmitter animation is read-only. It visualizes the exact final
+        # AETR values without changing the active serial adapter or PPM stream.
+        self.dashboard_page.update_transmitter(
+            channels,
+            adapter_kind=self._adapter_kind,
+            connection=getattr(self, "_adapter_connection_label", ""),
+            streaming=streaming,
+            failsafe=self.channel_mapper.last_strict_failsafe,
+        )
+
         # Keep the Arduino watchdog fed even when all controls remain stationary.
         self._maybe_stream_channels(channels, keepalive_only=True)
 
