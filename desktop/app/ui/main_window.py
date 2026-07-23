@@ -16,6 +16,7 @@ from ..services.calibration_service import CalibrationSession, CalibrationStore
 from ..services.channel_mapping_service import ChannelMapper
 from ..services.device_role_service import DeviceRoleResolver, ResolvedDeviceRoles
 from ..services.diagnostics_service import DiagnosticsService
+from ..services.firmware_installer_service import FirmwareInstallerService
 from ..services.joystick_service import JoystickInfo, JoystickService
 from ..services.profile_service import (
     ControllerProfile,
@@ -28,6 +29,7 @@ from ..services.settings_service import SettingsStore
 from .adapter_command_handlers import AdapterCommandHandlersMixin
 from .device_handlers import DeviceHandlersMixin
 from .input_handlers import InputHandlersMixin
+from .product_setup_handlers import ProductSetupHandlersMixin
 from .profile_handlers import ProfileHandlersMixin
 from .pages import (
     CalibrationPage,
@@ -39,11 +41,13 @@ from .pages import (
     ProfilesPage,
     SettingsPage,
 )
+from .setup_wizard import SetupWizard
 
 
 class MainWindow(
     InputHandlersMixin,
     ProfileHandlersMixin,
+    ProductSetupHandlersMixin,
     AdapterCommandHandlersMixin,
     DeviceHandlersMixin,
     QMainWindow,
@@ -70,6 +74,7 @@ class MainWindow(
             poll_interval_ms=5 if self.settings.low_latency_mode else 20,
             demo_enabled=self.settings.demo_joystick_enabled,
         )
+        self.firmware_installer = FirmwareInstallerService()
 
         self._device_infos: dict[int, JoystickInfo] = {}
         self._selected_instance_id: int | None = None
@@ -102,6 +107,10 @@ class MainWindow(
         self._identify_pending = False
         self._reboot_pending = False
         self._initial_status_scheduled = False
+        self._serial_ports: list[dict[str, Any]] = []
+        self._readiness_report = None
+        self._firmware_install_port = ""
+        self._firmware_install_target = ""
 
         self.dashboard_page = DashboardPage()
         self.joystick_page = JoystickPage()
@@ -112,6 +121,7 @@ class MainWindow(
         self.diagnostics_page = DiagnosticsPage()
         self.settings_page = SettingsPage()
         self.settings_page.set_settings(self.settings)
+        self.setup_wizard = SetupWizard(self)
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -159,6 +169,11 @@ class MainWindow(
         self._apply_channel_rate()
         self.channel_timer.start()
 
+        self.readiness_timer = QTimer(self)
+        self.readiness_timer.setInterval(500)
+        self.readiness_timer.timeout.connect(self._refresh_readiness)
+        self.readiness_timer.start()
+
         self.serial_service.start()
         self.joystick_service.start()
         self.diagnostics.info("Application", "Desktop application started")
@@ -175,6 +190,12 @@ class MainWindow(
             "Demo joystick "
             f"{'enabled' if self.settings.demo_joystick_enabled else 'disabled'}",
         )
+        QTimer.singleShot(250, self._refresh_readiness)
+        if (
+            not self.settings.setup_completed
+            or self.settings.setup_revision < self.SETUP_REVISION
+        ):
+            QTimer.singleShot(900, self._open_setup_wizard)
 
     def _wire_signals(self) -> None:
         self.joystick_service.devices_changed.connect(self._on_devices_changed)
@@ -235,6 +256,32 @@ class MainWindow(
             self.diagnostics_page.set_stats
         )
 
+        self.dashboard_page.setup_requested.connect(self._open_setup_wizard)
+        self.dashboard_page.action_requested.connect(
+            self._navigate_to_product_page
+        )
+        self.setup_wizard.action_requested.connect(
+            self._navigate_to_product_page
+        )
+        self.setup_wizard.finish_requested.connect(self._finish_product_setup)
+        self.setup_wizard.firmware_install_requested.connect(
+            self._install_bundled_firmware
+        )
+        self.setup_wizard.firmware_cancel_requested.connect(
+            self.firmware_installer.cancel
+        )
+        self.setup_wizard.ports_refresh_requested.connect(
+            self.serial_service.force_scan_ports
+        )
+        self.firmware_installer.progress.connect(self._firmware_progress)
+        self.firmware_installer.completed.connect(
+            self._firmware_install_completed
+        )
+        self.firmware_installer.failed.connect(self._firmware_install_failed)
+        self.firmware_installer.running_changed.connect(
+            self._firmware_running_changed
+        )
+
         self.diagnostics.entry_added.connect(
             self.diagnostics_page.add_entry
         )
@@ -256,6 +303,9 @@ class MainWindow(
 
     def _on_ports_changed(self, ports: list[dict[str, Any]]) -> None:
         """Replace a simulator session when a physical adapter is available."""
+
+        self._serial_ports = list(ports)
+        self.setup_wizard.set_ports(ports, self.settings.last_port)
 
         if self.serial_service.simulated and self.settings.auto_detect_adapter:
             candidates = self._adapter_port_candidates(ports)
@@ -301,7 +351,10 @@ class MainWindow(
         self._stream_paused_for_command = False
         self._failsafe_test_active = False
         self._status_request_pending = False
+        if self.firmware_installer.running:
+            self.firmware_installer.cancel()
         self.channel_timer.stop()
+        self.readiness_timer.stop()
         self.joystick_service.stop()
         self.serial_service.stop()
         try:
@@ -350,6 +403,8 @@ class MainWindow(
                 for mapping in active.mappings
             ]
             self.dashboard_page.set_channels(self._current_channels)
+        if hasattr(self, "setup_wizard"):
+            QTimer.singleShot(0, self._refresh_readiness)
 
     def _refresh_mapping_page(self) -> None:
         active = self._active_profile()
