@@ -36,8 +36,19 @@ class SerialService(QObject):
         self._connected_label = "Disconnected"
         self._simulated = False
         self._simulated_profile: dict[str, Any] | None = None
-        self._simulated_channels = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
-        self._simulated_pending: deque[tuple[MessageType, int, dict[str, Any]]] = deque()
+        self._simulated_channels = [
+            1500,
+            1500,
+            1000,
+            1500,
+            1500,
+            1500,
+            1500,
+            1500,
+        ]
+        self._simulated_pending: deque[
+            tuple[MessageType, int, dict[str, Any]]
+        ] = deque()
         self._simulated_last_channels_at = 0.0
         self._simulated_stream_active = False
         self._simulated_timeout_s = 0.7
@@ -58,14 +69,16 @@ class SerialService(QObject):
 
     @property
     def connected(self) -> bool:
-        return self._simulated or bool(self._serial and self._serial.is_open)
+        return self._simulated or bool(
+            self._serial and self._serial.is_open
+        )
 
     @property
     def simulated(self) -> bool:
         return self._simulated
 
     def start(self) -> None:
-        self.scan_ports()
+        self.force_scan_ports()
         self._poll_timer.start()
         self._scan_timer.start()
 
@@ -78,7 +91,7 @@ class SerialService(QObject):
     def set_baud(self, baud: int) -> None:
         self._baud = int(baud)
 
-    def scan_ports(self) -> None:
+    def scan_ports(self, force: bool = False) -> None:
         ports = [
             {
                 "device": port.device,
@@ -89,10 +102,16 @@ class SerialService(QObject):
             }
             for port in list_ports.comports()
         ]
-        signature = tuple((item["device"], item["description"]) for item in ports)
-        if signature != self._last_ports:
+        signature = tuple(
+            (item["device"], item["description"])
+            for item in ports
+        )
+        if force or signature != self._last_ports:
             self._last_ports = signature
             self.ports_changed.emit(ports)
+
+    def force_scan_ports(self) -> None:
+        self.scan_ports(force=True)
 
     def connect_port(self, port: str, baud: int | None = None) -> None:
         self.disconnect()
@@ -108,7 +127,9 @@ class SerialService(QObject):
             )
             self._simulated = False
             self._parser = FrameParser()
-            self._connected_label = f"{port} @ {int(baud or self._baud)}"
+            self._connected_label = (
+                f"{port} @ {int(baud or self._baud)}"
+            )
             self.connection_changed.emit(True, self._connected_label)
             self.request_hello()
         except (serial.SerialException, OSError) as exc:
@@ -119,7 +140,16 @@ class SerialService(QObject):
     def connect_simulator(self) -> None:
         self.disconnect()
         self._simulated = True
-        self._simulated_channels = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
+        self._simulated_channels = [
+            1500,
+            1500,
+            1000,
+            1500,
+            1500,
+            1500,
+            1500,
+            1500,
+        ]
         self._simulated_last_channels_at = 0.0
         self._simulated_stream_active = False
         self._connected_label = "Built-in ESP32-S3 simulator"
@@ -153,14 +183,26 @@ class SerialService(QObject):
             },
         )
 
-    def send(self, message_type: MessageType | int, payload: dict[str, Any] | None = None) -> int:
+    def send(
+        self,
+        message_type: MessageType | int,
+        payload: dict[str, Any] | None = None,
+    ) -> int:
         self._sequence = (self._sequence + 1) & 0xFFFF
         kind = MessageType(message_type)
-        frame = FrameCodec.encode(kind, self._sequence, payload or {})
+        frame = FrameCodec.encode(
+            kind,
+            self._sequence,
+            payload or {},
+        )
         if self._simulated:
             self._tx_frames += 1
             self._tx_bytes += len(frame)
-            self._simulate_request(kind, self._sequence, payload or {})
+            self._simulate_request(
+                kind,
+                self._sequence,
+                payload or {},
+            )
             self._emit_stats()
             return self._sequence
         if not self._serial or not self._serial.is_open:
@@ -178,7 +220,9 @@ class SerialService(QObject):
     def _poll(self) -> None:
         if self._simulated:
             if self._simulated_pending:
-                kind, sequence, payload = self._simulated_pending.popleft()
+                kind, sequence, payload = (
+                    self._simulated_pending.popleft()
+                )
                 self._deliver_simulated(kind, sequence, payload)
             return
         if not self._serial or not self._serial.is_open:
@@ -197,11 +241,23 @@ class SerialService(QObject):
             self.disconnect()
 
     def _deliver(self, frame: ProtocolFrame) -> None:
-        self.message_received.emit(int(frame.message_type), frame.payload)
+        self.message_received.emit(
+            int(frame.message_type),
+            frame.payload,
+        )
 
-    def _simulate_request(self, kind: MessageType, sequence: int, payload: dict[str, Any]) -> None:
+    def _simulate_request(
+        self,
+        kind: MessageType,
+        sequence: int,
+        payload: dict[str, Any],
+    ) -> None:
         response_kind = MessageType.ACK
-        response: dict[str, Any] = {"ok": True, "request": kind.name, "sequence": sequence}
+        response: dict[str, Any] = {
+            "ok": True,
+            "request": kind.name,
+            "sequence": sequence,
+        }
         if kind == MessageType.HELLO:
             response_kind = MessageType.HELLO_RESPONSE
             response = {
@@ -226,7 +282,9 @@ class SerialService(QObject):
                 "firmware_version": "0.2.0-simulator",
                 "ppm_gpio": 4,
                 "mode": "desktop_stream_simulator",
-                "active_profile": (self._simulated_profile or {}).get("name", "Default"),
+                "active_profile": (
+                    self._simulated_profile or {}
+                ).get("name", "Default"),
             }
         elif kind == MessageType.STATUS:
             response_kind = MessageType.STATUS
@@ -234,33 +292,65 @@ class SerialService(QObject):
         elif kind == MessageType.PROFILE_VALIDATE:
             profile = payload.get("profile", {})
             errors = self._validate_simulated_profile(profile)
-            response = {"ok": not errors, "request": kind.name, "errors": errors}
-            response_kind = MessageType.ACK if not errors else MessageType.ERROR
+            response = {
+                "ok": not errors,
+                "request": kind.name,
+                "errors": errors,
+            }
+            response_kind = (
+                MessageType.ACK
+                if not errors
+                else MessageType.ERROR
+            )
         elif kind == MessageType.PROFILE_WRITE:
             profile = payload.get("profile", {})
             errors = self._validate_simulated_profile(profile)
             if errors:
                 response_kind = MessageType.ERROR
-                response = {"ok": False, "request": kind.name, "errors": errors}
+                response = {
+                    "ok": False,
+                    "request": kind.name,
+                    "errors": errors,
+                }
             else:
                 self._simulated_profile = profile
-                response = {"ok": True, "request": kind.name, "profile_id": profile.get("profile_id")}
+                response = {
+                    "ok": True,
+                    "request": kind.name,
+                    "profile_id": profile.get("profile_id"),
+                }
         elif kind == MessageType.PROFILE_ACTIVATE:
-            response = {"ok": self._simulated_profile is not None, "request": kind.name}
+            response = {
+                "ok": self._simulated_profile is not None,
+                "request": kind.name,
+            }
         elif kind == MessageType.LIVE_CHANNELS:
             channels = payload.get("channels", [])
             if isinstance(channels, list) and channels:
-                self._simulated_channels = [max(800, min(2200, int(value))) for value in channels[:16]]
+                self._simulated_channels = [
+                    max(800, min(2200, int(value)))
+                    for value in channels[:16]
+                ]
                 self._simulated_last_channels_at = time.monotonic()
                 self._simulated_stream_active = True
             return
         elif kind == MessageType.REBOOT:
             self._simulated_stream_active = False
             self._simulated_last_channels_at = 0.0
-            response = {"ok": True, "request": kind.name, "message": "Simulator rebooted"}
+            response = {
+                "ok": True,
+                "request": kind.name,
+                "message": "Simulator rebooted",
+            }
         elif kind == MessageType.BOOTLOADER:
-            response = {"ok": True, "request": kind.name, "message": "Simulator entered bootloader mode"}
-        self._simulated_pending.append((response_kind, sequence, response))
+            response = {
+                "ok": True,
+                "request": kind.name,
+                "message": "Simulator entered bootloader mode",
+            }
+        self._simulated_pending.append(
+            (response_kind, sequence, response)
+        )
 
     @staticmethod
     def _validate_simulated_profile(profile: Any) -> list[str]:
@@ -269,18 +359,34 @@ class SerialService(QObject):
             return ["profile must be an object"]
         channel_count = profile.get("channel_count", 0)
         mappings = profile.get("mappings", [])
-        if not isinstance(channel_count, int) or not 4 <= channel_count <= 16:
+        if (
+            not isinstance(channel_count, int)
+            or not 4 <= channel_count <= 16
+        ):
             errors.append("channel_count must be 4..16")
-        if not isinstance(mappings, list) or len(mappings) != channel_count:
+        if (
+            not isinstance(mappings, list)
+            or len(mappings) != channel_count
+        ):
             errors.append("mapping count must match channel_count")
         return errors
 
     def _simulated_status_payload(self) -> dict[str, Any]:
         now = time.monotonic()
-        age_s = now - self._simulated_last_channels_at if self._simulated_last_channels_at else 0.0
-        if self._simulated_stream_active and age_s > self._simulated_timeout_s:
+        age_s = (
+            now - self._simulated_last_channels_at
+            if self._simulated_last_channels_at
+            else 0.0
+        )
+        if (
+            self._simulated_stream_active
+            and age_s > self._simulated_timeout_s
+        ):
             count = max(4, len(self._simulated_channels))
-            self._simulated_channels = [1000 if index == 2 else 1500 for index in range(count)]
+            self._simulated_channels = [
+                1000 if index == 2 else 1500
+                for index in range(count)
+            ]
             self._simulated_stream_active = False
         failsafe_active = not self._simulated_stream_active
         return {
@@ -291,11 +397,22 @@ class SerialService(QObject):
             "stream_age_ms": int(age_s * 1000),
             "ppm_active": True,
             "channels": list(self._simulated_channels),
-            "active_profile": (self._simulated_profile or {}).get("name", "Default"),
-            "faults": ["desktop_stream_timeout"] if failsafe_active else [],
+            "active_profile": (
+                self._simulated_profile or {}
+            ).get("name", "Default"),
+            "faults": (
+                ["desktop_stream_timeout"]
+                if failsafe_active
+                else []
+            ),
         }
 
-    def _deliver_simulated(self, kind: MessageType, sequence: int, payload: dict[str, Any]) -> None:
+    def _deliver_simulated(
+        self,
+        kind: MessageType,
+        sequence: int,
+        payload: dict[str, Any],
+    ) -> None:
         encoded = FrameCodec.encode(kind, sequence, payload)
         self._rx_bytes += len(encoded)
         for frame in self._parser.feed(encoded):
@@ -305,7 +422,11 @@ class SerialService(QObject):
     def _emit_simulated_status(self) -> None:
         if not self._simulated:
             return
-        self._deliver_simulated(MessageType.STATUS, 0, self._simulated_status_payload())
+        self._deliver_simulated(
+            MessageType.STATUS,
+            0,
+            self._simulated_status_payload(),
+        )
 
     def _emit_stats(self) -> None:
         stats = self._parser.stats()
