@@ -27,10 +27,20 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.7.0"
 
 
 def main() -> int:
+    # The packaged executable is launched once with this flag in CI. Reaching
+    # this point proves that the bundled Python runtime, Qt, pygame, serial
+    # modules and the complete application import graph can load successfully.
+    if "--packaging-smoke-test" in sys.argv:
+        return 0
+    if "--version" in sys.argv:
+        if sys.stdout is not None:
+            sys.stdout.write(APP_VERSION + "\n")
+        return 0
+
     app = QApplication(sys.argv)
     app.setApplicationName("Simulator Joystick to FlySky")
     app.setApplicationVersion(APP_VERSION)
@@ -38,7 +48,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "low-latency-visible-adapter-status-and-command-responses",
+        "windows-portable-exe-low-latency-multi-device-aetr",
     )
 
     def show_unhandled_exception(
