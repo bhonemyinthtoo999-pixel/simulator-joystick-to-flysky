@@ -2,15 +2,12 @@
  * Simulator Joystick to FlySky — Arduino UNO/Nano Bridge
  *
  * Signal path:
- *   USB joystick -> Windows desktop app -> Arduino USB serial -> PPM -> FlySky trainer port
+ *   USB flight controls -> Windows desktop app -> USB serial -> UNO/Nano
+ *   -> PPM on D9 -> FlySky trainer port
  *
- * This firmware intentionally does not act as a USB host. The desktop application
- * performs joystick discovery, calibration and channel mapping, then streams safe
- * RC pulse values to the Arduino using the project's SJ protocol.
- *
- * Target boards:
- *   - Arduino UNO R3 (ATmega328P)
- *   - Arduino Nano (ATmega328P, select the correct bootloader in Arduino IDE)
+ * The desktop performs multi-device calibration and channel mapping. This
+ * firmware receives final RC pulse values and continuously generates PPM.
+ * Safe PPM starts immediately at boot, even before the desktop connects.
  */
 
 #include <Arduino.h>
@@ -19,20 +16,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !defined(__AVR_ATmega328P__)
+#error "This sketch targets Arduino UNO/Nano boards using the ATmega328P."
+#endif
+
 namespace {
 
 constexpr uint8_t PROTOCOL_MAJOR = 1;
 constexpr uint8_t MAGIC_0 = 'S';
 constexpr uint8_t MAGIC_1 = 'J';
 
-constexpr uint8_t PPM_OUTPUT_PIN = 9;
+constexpr uint8_t PPM_OUTPUT_PIN = 9;       // ATmega328P PB1
+constexpr uint8_t HEARTBEAT_PIN = LED_BUILTIN;  // ATmega328P PB5 / D13
 constexpr uint8_t MAX_CHANNELS = 8;
 constexpr uint8_t DEFAULT_CHANNEL_COUNT = 8;
 constexpr uint16_t PPM_FRAME_US = 22500;
 constexpr uint16_t PPM_PULSE_US = 400;
-
-// FlySky prototype setting: idle HIGH and short LOW separator pulses.
-// Change to false only after measuring and confirming the exact trainer input.
 constexpr bool PPM_IDLE_HIGH = true;
 
 constexpr uint32_t FAILSAFE_TIMEOUT_MS = 700;
@@ -41,8 +40,8 @@ constexpr uint16_t CHANNEL_MIN_US = 800;
 constexpr uint16_t CHANNEL_MAX_US = 2200;
 constexpr size_t MAX_PAYLOAD = 384;
 
-static_assert(PPM_FRAME_US < 32768, "Timer1 interval must fit in 16 bits at 0.5 us/tick");
-static_assert(PPM_PULSE_US >= 100, "PPM pulse is unexpectedly short");
+static_assert(PPM_FRAME_US < 32768, "Timer1 interval must fit at 0.5 us/tick");
+static_assert(PPM_PULSE_US >= 100, "PPM separator pulse is unexpectedly short");
 
 enum MessageType : uint8_t {
   MSG_HELLO = 1,
@@ -69,6 +68,8 @@ volatile uint8_t g_channel_count = DEFAULT_CHANNEL_COUNT;
 volatile bool g_begin_pulse = true;
 volatile uint8_t g_interval_index = 0;
 volatile uint32_t g_frame_used_us = 0;
+volatile uint32_t g_ppm_frame_count = 0;
+volatile uint8_t g_heartbeat_divider = 0;
 
 bool g_stream_active = false;
 uint32_t g_last_valid_channels_ms = 0;
@@ -77,8 +78,9 @@ uint32_t g_last_status_ms = 0;
 uint16_t crc16Update(uint16_t crc, uint8_t value) {
   crc ^= static_cast<uint16_t>(value) << 8;
   for (uint8_t bit = 0; bit < 8; ++bit) {
-    crc = (crc & 0x8000U) ? static_cast<uint16_t>((crc << 1U) ^ 0x1021U)
-                          : static_cast<uint16_t>(crc << 1U);
+    crc = (crc & 0x8000U)
+              ? static_cast<uint16_t>((crc << 1U) ^ 0x1021U)
+              : static_cast<uint16_t>(crc << 1U);
   }
   return crc;
 }
@@ -93,13 +95,25 @@ uint16_t clampChannel(long value) {
   return static_cast<uint16_t>(value);
 }
 
-void writePpmLevel(bool high) {
-  digitalWrite(PPM_OUTPUT_PIN, high ? HIGH : LOW);
+inline void writePpmLevel(bool high) {
+  // Direct PB1 writes keep D9 edges deterministic inside the timer ISR.
+  if (high) {
+    PORTB |= _BV(PORTB1);
+  } else {
+    PORTB &= static_cast<uint8_t>(~_BV(PORTB1));
+  }
 }
 
-uint16_t microsecondsToTimerTicks(uint16_t microseconds) {
-  // ATmega328P at 16 MHz with Timer1 prescaler 8 => 0.5 us per timer tick.
-  return static_cast<uint16_t>(microseconds * 2U);
+inline void scheduleTimerMicroseconds(uint16_t microseconds) {
+  // Timer1 CTC, 16 MHz / 8 = 2 ticks/us. OCR1A is inclusive.
+  uint32_t ticks = static_cast<uint32_t>(microseconds) * 2UL;
+  if (ticks < 2UL) {
+    ticks = 2UL;
+  }
+  if (ticks > 65535UL) {
+    ticks = 65535UL;
+  }
+  OCR1A = static_cast<uint16_t>(ticks - 1UL);
 }
 
 void makeFailsafe(uint16_t *values, uint8_t count) {
@@ -127,11 +141,9 @@ void applyChannels(const uint16_t *values, uint8_t count) {
 void applyFailsafe() {
   uint16_t safe[MAX_CHANNELS];
   uint8_t count;
-
   noInterrupts();
   count = g_channel_count;
   interrupts();
-
   makeFailsafe(safe, count);
   applyChannels(safe, count);
   g_stream_active = false;
@@ -142,7 +154,7 @@ ISR(TIMER1_COMPA_vect) {
 
   if (g_begin_pulse) {
     writePpmLevel(active_level);
-    OCR1A = static_cast<uint16_t>(OCR1A + microsecondsToTimerTicks(PPM_PULSE_US));
+    scheduleTimerMicroseconds(PPM_PULSE_US);
     g_begin_pulse = false;
     return;
   }
@@ -150,7 +162,7 @@ ISR(TIMER1_COMPA_vect) {
   writePpmLevel(PPM_IDLE_HIGH);
   g_begin_pulse = true;
 
-  uint16_t delay_us;
+  uint16_t delay_us = 1000;
   const uint8_t count = g_channel_count;
 
   if (g_interval_index < count) {
@@ -162,7 +174,6 @@ ISR(TIMER1_COMPA_vect) {
     g_frame_used_us += channel_us;
     ++g_interval_index;
   } else {
-    // Keep at least 1 ms of synchronization gap even if endpoint settings are high.
     uint32_t frame_us = PPM_FRAME_US;
     const uint32_t minimum_frame = g_frame_used_us + PPM_PULSE_US + 1000UL;
     if (frame_us < minimum_frame) {
@@ -171,22 +182,32 @@ ISR(TIMER1_COMPA_vect) {
     delay_us = static_cast<uint16_t>(frame_us - g_frame_used_us - PPM_PULSE_US);
     g_frame_used_us = 0;
     g_interval_index = 0;
+    ++g_ppm_frame_count;
+
+    // D13 blinks at roughly 0.9 Hz while the PPM engine is running.
+    if (++g_heartbeat_divider >= 25) {
+      g_heartbeat_divider = 0;
+      PORTB ^= _BV(PORTB5);
+    }
   }
 
-  OCR1A = static_cast<uint16_t>(OCR1A + microsecondsToTimerTicks(delay_us));
+  scheduleTimerMicroseconds(delay_us);
 }
 
 void setupPpm() {
   pinMode(PPM_OUTPUT_PIN, OUTPUT);
+  pinMode(HEARTBEAT_PIN, OUTPUT);
   writePpmLevel(PPM_IDLE_HIGH);
+  digitalWrite(HEARTBEAT_PIN, LOW);
 
   noInterrupts();
   TCCR1A = 0;
   TCCR1B = 0;
   TCNT1 = 0;
-  OCR1A = 200;
-  TCCR1B |= _BV(CS11);  // Prescaler 8.
-  TIMSK1 |= _BV(OCIE1A);
+  scheduleTimerMicroseconds(100);
+  TIFR1 = _BV(OCF1A);
+  TIMSK1 = _BV(OCIE1A);
+  TCCR1B = _BV(WGM12) | _BV(CS11);  // CTC mode, prescaler 8.
   interrupts();
 }
 
@@ -194,7 +215,6 @@ void sendFrame(uint8_t type, uint16_t sequence, const char *json) {
   if (!json) {
     json = "{}";
   }
-
   const size_t payload_length = strlen(json);
   if (payload_length > MAX_PAYLOAD) {
     return;
@@ -210,8 +230,8 @@ void sendFrame(uint8_t type, uint16_t sequence, const char *json) {
   };
 
   uint16_t crc = 0xFFFFU;
-  for (uint8_t value : header) {
-    crc = crc16Update(crc, value);
+  for (uint8_t index = 0; index < sizeof(header); ++index) {
+    crc = crc16Update(crc, header[index]);
   }
   for (size_t index = 0; index < payload_length; ++index) {
     crc = crc16Update(crc, static_cast<uint8_t>(json[index]));
@@ -229,17 +249,18 @@ void sendHello(uint16_t sequence) {
   sendFrame(
       MSG_HELLO_RESPONSE,
       sequence,
-      "{\"protocol_major\":1,\"protocol_minor\":0,\"firmware_version\":\"0.1.0-arduino\","
-      "\"board\":\"Arduino UNO/Nano ATmega328P\",\"hardware_revision\":\"bridge\","
-      "\"capabilities\":[\"ppm\",\"desktop_stream\",\"failsafe\",\"stream_only\"]}");
+      "{\"protocol_major\":1,\"protocol_minor\":0,\"firmware_version\":\"0.2.0-arduino-uno\"," 
+      "\"board\":\"Arduino UNO/Nano ATmega328P\",\"hardware_revision\":\"bridge-d9-v2\"," 
+      "\"capabilities\":[\"ppm\",\"desktop_stream\",\"failsafe\",\"stream_only\",\"ppm_engine_status\"]}");
 }
 
 void sendDeviceInfo(uint16_t sequence) {
   sendFrame(
       MSG_DEVICE_INFO,
       sequence,
-      "{\"board\":\"Arduino UNO/Nano ATmega328P\",\"firmware_version\":\"0.1.0-arduino\","
-      "\"ppm_gpio\":9,\"mode\":\"desktop_bridge\",\"persistent_profiles\":false}");
+      "{\"board\":\"Arduino UNO/Nano ATmega328P\",\"firmware_version\":\"0.2.0-arduino-uno\"," 
+      "\"ppm_gpio\":9,\"ppm_frame_us\":22500,\"ppm_pulse_us\":400,\"ppm_idle_high\":true," 
+      "\"mode\":\"desktop_bridge\",\"persistent_profiles\":false}");
 }
 
 void sendAck(uint16_t sequence, const char *request) {
@@ -266,51 +287,68 @@ void sendError(uint16_t sequence, const char *request, const char *message) {
 void sendStatus(uint16_t sequence) {
   uint16_t snapshot[MAX_CHANNELS];
   uint8_t count;
+  uint32_t frame_count;
 
   noInterrupts();
   count = g_channel_count;
+  frame_count = g_ppm_frame_count;
   for (uint8_t index = 0; index < count; ++index) {
     snapshot[index] = g_channels[index];
   }
   interrupts();
 
-  char json[260];
+  const uint32_t now = millis();
+  const uint32_t stream_age = g_last_valid_channels_ms
+                                  ? static_cast<uint32_t>(now - g_last_valid_channels_ms)
+                                  : 0UL;
+  const bool ppm_active = frame_count > 0;
+  const bool failsafe_active = !g_stream_active;
+
+  char json[420];
   int used = snprintf(
       json,
       sizeof(json),
-      "{\"uptime_ms\":%lu,\"joystick_connected\":%s,\"ppm_active\":true,"
-      "\"active_profile\":\"Desktop stream\",\"channels\":[",
-      static_cast<unsigned long>(millis()),
-      g_stream_active ? "true" : "false");
+      "{\"uptime_ms\":%lu,\"stream_active\":%s,\"joystick_connected\":%s," 
+      "\"failsafe_active\":%s,\"stream_age_ms\":%lu,\"ppm_active\":%s," 
+      "\"ppm_gpio\":9,\"ppm_frame_count\":%lu,\"ppm_frame_us\":22500," 
+      "\"ppm_pulse_us\":400,\"ppm_idle_high\":true,\"channels\":[",
+      static_cast<unsigned long>(now),
+      g_stream_active ? "true" : "false",
+      g_stream_active ? "true" : "false",
+      failsafe_active ? "true" : "false",
+      static_cast<unsigned long>(stream_age),
+      ppm_active ? "true" : "false",
+      static_cast<unsigned long>(frame_count));
 
-  if (used < 0) {
+  if (used < 0 || static_cast<size_t>(used) >= sizeof(json)) {
     return;
   }
 
-  for (uint8_t index = 0; index < count && static_cast<size_t>(used) < sizeof(json); ++index) {
+  for (uint8_t index = 0; index < count; ++index) {
     const int written = snprintf(
         json + used,
         sizeof(json) - static_cast<size_t>(used),
         "%s%u",
         index ? "," : "",
         snapshot[index]);
-    if (written < 0) {
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(json) - static_cast<size_t>(used)) {
       return;
     }
     used += written;
   }
 
-  if (static_cast<size_t>(used) < sizeof(json)) {
-    snprintf(json + used, sizeof(json) - static_cast<size_t>(used), "],\"faults\":[]}");
-    sendFrame(MSG_STATUS, sequence, json);
-  }
+  snprintf(
+      json + used,
+      sizeof(json) - static_cast<size_t>(used),
+      "],\"active_profile\":\"Desktop stream\",\"faults\":%s}",
+      failsafe_active ? "[\"desktop_stream_timeout\"]" : "[]");
+  sendFrame(MSG_STATUS, sequence, json);
 }
 
 bool parseChannelArray(char *payload, uint16_t *values, uint8_t &count) {
   if (!payload || !values) {
     return false;
   }
-
   char *cursor = strstr(payload, "\"channels\"");
   if (!cursor) {
     return false;
@@ -323,7 +361,8 @@ bool parseChannelArray(char *payload, uint16_t *values, uint8_t &count) {
 
   count = 0;
   while (*cursor && count < MAX_CHANNELS) {
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n' || *cursor == ',') {
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n' || *cursor == ',') {
       ++cursor;
     }
     if (*cursor == ']') {
@@ -348,7 +387,6 @@ bool parseChannelArray(char *payload, uint16_t *values, uint8_t &count) {
       return false;
     }
   }
-
   return count >= 4;
 }
 
@@ -370,15 +408,12 @@ void handleFrame(uint8_t major, uint8_t type, uint16_t sequence, char *payload) 
     case MSG_HELLO:
       sendHello(sequence);
       break;
-
     case MSG_DEVICE_INFO:
       sendDeviceInfo(sequence);
       break;
-
     case MSG_STATUS:
       sendStatus(sequence);
       break;
-
     case MSG_LIVE_CHANNELS: {
       uint16_t values[MAX_CHANNELS];
       uint8_t count = 0;
@@ -391,29 +426,22 @@ void handleFrame(uint8_t major, uint8_t type, uint16_t sequence, char *payload) 
       g_stream_active = true;
       break;
     }
-
     case MSG_PROFILE_VALIDATE:
-      // Mapping and profile persistence are handled by the desktop app in this bridge variant.
       sendAck(sequence, "PROFILE_VALIDATE");
       break;
-
     case MSG_PROFILE_WRITE:
       sendAck(sequence, "PROFILE_WRITE");
       break;
-
     case MSG_PROFILE_ACTIVATE:
       sendAck(sequence, "PROFILE_ACTIVATE");
       break;
-
     case MSG_REBOOT:
       sendAck(sequence, "REBOOT");
       rebootBoard();
       break;
-
     case MSG_BOOTLOADER:
       sendError(sequence, "BOOTLOADER", "automatic bootloader entry is not supported on UNO/Nano");
       break;
-
     default:
       sendError(sequence, "UNKNOWN", "unsupported message type on Arduino bridge");
       break;
@@ -537,10 +565,6 @@ void setup() {
 
   Serial.begin(115200);
   delay(50);
-
-  // Opening an UNO/Nano serial port normally resets the board. Sending an unsolicited
-  // hello after startup lets the desktop identify the bridge even if its first request
-  // was transmitted while the bootloader was still running.
   sendHello(0);
   wdt_enable(WDTO_1S);
 }
@@ -556,7 +580,8 @@ void loop() {
   }
 
   const uint32_t now = millis();
-  if (g_stream_active && static_cast<uint32_t>(now - g_last_valid_channels_ms) > FAILSAFE_TIMEOUT_MS) {
+  if (g_stream_active &&
+      static_cast<uint32_t>(now - g_last_valid_channels_ms) > FAILSAFE_TIMEOUT_MS) {
     applyFailsafe();
   }
 
