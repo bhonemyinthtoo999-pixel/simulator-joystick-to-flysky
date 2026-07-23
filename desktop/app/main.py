@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 
 
 def main() -> int:
@@ -38,7 +38,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "multi-device-aetr-automatic-adapter-board-detection",
+        "physical-adapter-priority-hardened-uno-d9-ppm",
     )
 
     def show_unhandled_exception(
