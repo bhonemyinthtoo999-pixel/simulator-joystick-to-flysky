@@ -10,6 +10,8 @@ on:
   pull_request:
     paths:
       - "desktop/**"
+      - "firmware/arduino-uno/**"
+      - "firmware/arduino-mega/**"
       - ".github/workflows/windows-exe.yml"
   workflow_dispatch:
 
@@ -38,6 +40,9 @@ jobs:
             desktop/requirements-dev.txt
             desktop/requirements-build.txt
 
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
       - name: Install application and build dependencies
         working-directory: desktop
         run: |
@@ -51,6 +56,44 @@ jobs:
           if (-not (Test-Path "assets/SimulatorJoystickToFlySky.ico")) { throw "ICO file was not generated" }
           if ((Get-Item "assets/SimulatorJoystickToFlySky.ico").Length -lt 1024) { throw "Generated ICO is unexpectedly small" }
 
+      - name: Compile and bundle Arduino firmware installer
+        shell: pwsh
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+
+          $assetRoot = "desktop/assets/firmware"
+          $hexRoot = Join-Path $assetRoot "hex"
+          $toolRoot = Join-Path $assetRoot "tools/avrdude"
+          $unoOut = Join-Path $env:RUNNER_TEMP "simjoy-uno-build"
+          $megaOut = Join-Path $env:RUNNER_TEMP "simjoy-mega-build"
+          New-Item -ItemType Directory -Force -Path $hexRoot, $toolRoot, $unoOut, $megaOut | Out-Null
+
+          arduino-cli compile --fqbn arduino:avr:uno --output-dir $unoOut "firmware/arduino-uno/simjoy_arduino_bridge"
+          arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 --output-dir $megaOut "firmware/arduino-mega/simjoy_mega_bridge"
+
+          $unoHex = Get-ChildItem $unoOut -Filter "*.ino.hex" | Where-Object { $_.Name -notlike "*with_bootloader*" } | Select-Object -First 1
+          $megaHex = Get-ChildItem $megaOut -Filter "*.ino.hex" | Where-Object { $_.Name -notlike "*with_bootloader*" } | Select-Object -First 1
+          if (-not $unoHex) { throw "UNO firmware HEX was not generated" }
+          if (-not $megaHex) { throw "Mega firmware HEX was not generated" }
+          Copy-Item $unoHex.FullName (Join-Path $hexRoot "simjoy-uno.hex") -Force
+          Copy-Item $megaHex.FullName (Join-Path $hexRoot "simjoy-mega.hex") -Force
+
+          $arduinoData = Join-Path $env:LOCALAPPDATA "Arduino15/packages/arduino/tools/avrdude"
+          $avrdudePackage = Get-ChildItem $arduinoData -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $avrdudePackage) { throw "Arduino AVR avrdude package was not found" }
+          Copy-Item (Join-Path $avrdudePackage.FullName "*") $toolRoot -Recurse -Force
+
+          $required = @(
+            (Join-Path $hexRoot "simjoy-uno.hex"),
+            (Join-Path $hexRoot "simjoy-mega.hex"),
+            (Join-Path $toolRoot "bin/avrdude.exe"),
+            (Join-Path $toolRoot "etc/avrdude.conf")
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing firmware installer component: $path" }
+          }
+
       - name: Run desktop tests
         working-directory: desktop
         run: python -m pytest -q --tb=short
@@ -59,14 +102,24 @@ jobs:
         working-directory: desktop
         run: python -m PyInstaller --noconfirm --clean SimulatorJoystickToFlySky.spec
 
-      - name: Smoke-test packaged executable
+      - name: Smoke-test packaged executable and firmware assets
         shell: pwsh
         working-directory: desktop
         run: |
-          $exe = Resolve-Path "dist\SimulatorJoystickToFlySky\SimulatorJoystickToFlySky.exe"
+          $appDir = Resolve-Path "dist\SimulatorJoystickToFlySky"
+          $exe = Join-Path $appDir "SimulatorJoystickToFlySky.exe"
           $process = Start-Process -FilePath $exe -ArgumentList "--packaging-smoke-test" -Wait -PassThru
           if ($process.ExitCode -ne 0) {
             throw "Packaged executable smoke test failed with exit code $($process.ExitCode)"
+          }
+          $required = @(
+            (Join-Path $appDir "_internal/assets/firmware/hex/simjoy-uno.hex"),
+            (Join-Path $appDir "_internal/assets/firmware/hex/simjoy-mega.hex"),
+            (Join-Path $appDir "_internal/assets/firmware/tools/avrdude/bin/avrdude.exe"),
+            (Join-Path $appDir "_internal/assets/firmware/tools/avrdude/etc/avrdude.conf")
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Packaged firmware asset missing: $path" }
           }
 
       - name: Assemble release ZIP
@@ -85,11 +138,11 @@ jobs:
           Copy-Item "firmware\arduino-mega" (Join-Path $packageDir "firmware\arduino-mega") -Recurse -Force
           @"
           Simulator Joystick to FlySky v$version
-          Windows 10/11 x64 portable application
+          Windows 10/11 x64 application
 
           Start: SimulatorJoystickToFlySky.exe
-          UNO/Nano PPM output: D9
-          Mega 2560 PPM output: D11
+          First run: follow the built-in setup assistant
+          One-click firmware: UNO/Nano D9 and Mega 2560 D11
           User settings: %USERPROFILE%\.simulator-joystick-to-flysky\
           "@ | Set-Content -Path (Join-Path $packageDir "START-HERE.txt") -Encoding UTF8
           $zipPath = Join-Path "release" "$packageName.zip"
@@ -121,6 +174,6 @@ jobs:
               sha: context.sha,
               state: passed ? 'success' : 'failure',
               context: 'windows-exe/build',
-              description: passed ? 'Windows EXE package built with app icon' : 'Windows EXE build failed',
+              description: passed ? 'Windows app built with setup assistant and firmware installer' : 'Windows app build failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
