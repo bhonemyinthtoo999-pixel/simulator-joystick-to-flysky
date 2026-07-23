@@ -15,5 +15,7 @@ def asset_path(filename: str) -> Path:
 def application_icon() -> QIcon:
     """Return the shared logo-safe icon used by the window and packaged EXE."""
 
-    icon = QIcon(str(asset_path("app_icon.svg")))
-    return icon
+    rendered = asset_path("SimulatorJoystickToFlySky.png")
+    source = asset_path("app_icon.svg")
+    icon_path = rendered if rendered.exists() else source
+    return QIcon(str(icon_path))
