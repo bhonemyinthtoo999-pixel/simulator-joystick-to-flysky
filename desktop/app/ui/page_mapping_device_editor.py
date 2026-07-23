@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QFormLayout, QLayout, QWidget
 
 from ..services.channel_mapping_service import ChannelMapping
 from ..services.device_role_service import ROLE_LABELS, ROLE_ORDER
@@ -12,8 +12,8 @@ from .page_mapping import MappingPage as BaseMappingPage
 class MappingPage(BaseMappingPage):
     """Channel editor with explicit device-role and input selectors.
 
-    The profile still stores logical roles so it remains portable when USB ports
-    change. The selector text also shows the currently resolved physical device,
+    The profile stores logical roles so mappings remain portable when USB ports
+    change. Selector text also shows the currently resolved physical device,
     making it clear which controller supplies each RC channel.
     """
 
@@ -31,17 +31,17 @@ class MappingPage(BaseMappingPage):
             "Choose an axis, button or hat from the selected device."
         )
 
-        source_layout = self._find_layout_containing(self.layout(), self.source_combo)
-        if source_layout is None:
-            raise RuntimeError("Unable to locate the channel source editor layout")
-
-        self.device_label = QLabel("Device")
-        self.input_label = QLabel("Input")
-        self.device_label.setStyleSheet("font-weight: 600;")
-        self.input_label.setStyleSheet("font-weight: 600;")
-        source_layout.insertWidget(0, self.device_label)
-        source_layout.insertWidget(1, self.device_combo, 1)
-        source_layout.insertWidget(2, self.input_label)
+        located = self._find_form_row_for_widget(self.source_combo)
+        if located is None:
+            raise RuntimeError("Unable to locate the channel source form row")
+        source_form, source_row = located
+        label_item = source_form.itemAt(
+            source_row,
+            QFormLayout.ItemRole.LabelRole,
+        )
+        if label_item is not None and label_item.widget() is not None:
+            label_item.widget().setText("Input")
+        source_form.insertRow(source_row, "Device", self.device_combo)
 
         self.device_combo.currentIndexChanged.connect(self._channel_device_changed)
         self.learn_status.setText(
@@ -50,27 +50,49 @@ class MappingPage(BaseMappingPage):
         self._set_editor_enabled(False)
 
     @classmethod
-    def _find_layout_containing(
+    def _find_form_row_for_widget(
+        cls,
+        target: QWidget,
+    ) -> tuple[QFormLayout, int] | None:
+        parent = target.parentWidget()
+        while parent is not None:
+            layout = parent.layout()
+            if isinstance(layout, QFormLayout):
+                for row in range(layout.rowCount()):
+                    field_item = layout.itemAt(
+                        row,
+                        QFormLayout.ItemRole.FieldRole,
+                    )
+                    if field_item is not None and cls._item_contains_widget(
+                        field_item,
+                        target,
+                    ):
+                        return layout, row
+            parent = parent.parentWidget()
+        return None
+
+    @classmethod
+    def _item_contains_widget(cls, item: Any, target: QWidget) -> bool:
+        if item.widget() is target:
+            return True
+        child_layout = item.layout()
+        return cls._layout_contains_widget(child_layout, target)
+
+    @classmethod
+    def _layout_contains_widget(
         cls,
         layout: QLayout | None,
         target: QWidget,
-    ) -> QLayout | None:
+    ) -> bool:
         if layout is None:
-            return None
+            return False
         for index in range(layout.count()):
             item = layout.itemAt(index)
             if item.widget() is target:
-                return layout
-            child_layout = item.layout()
-            found = cls._find_layout_containing(child_layout, target)
-            if found is not None:
-                return found
-            child_widget = item.widget()
-            if child_widget is not None:
-                found = cls._find_layout_containing(child_widget.layout(), target)
-                if found is not None:
-                    return found
-        return None
+                return True
+            if cls._layout_contains_widget(item.layout(), target):
+                return True
+        return False
 
     def _set_editor_enabled(self, enabled: bool) -> None:
         super()._set_editor_enabled(enabled)
@@ -97,7 +119,9 @@ class MappingPage(BaseMappingPage):
 
         role_index = self.device_combo.findData(wanted_role)
         self.device_combo.setCurrentIndex(max(0, role_index))
-        selected_role = str(self.device_combo.currentData() or "primary_stick")
+        selected_role = str(
+            self.device_combo.currentData() or "primary_stick"
+        )
         self.device_combo.blockSignals(False)
 
         self._populate_inputs_for_role(selected_role, wanted)
@@ -154,24 +178,38 @@ class MappingPage(BaseMappingPage):
         if wanted is not None and wanted[0] == role:
             selected = self._set_source_data(wanted)
             if not selected:
-                _wanted_role, source_type, source_index, component, constant = wanted
+                (
+                    _wanted_role,
+                    source_type,
+                    source_index,
+                    component,
+                    constant,
+                ) = wanted
                 self.source_combo.addItem(
                     f"Saved {source_type} {source_index} — unavailable",
                     (role, source_type, source_index, component, constant),
                 )
-                self.source_combo.setCurrentIndex(self.source_combo.count() - 1)
+                self.source_combo.setCurrentIndex(
+                    self.source_combo.count() - 1
+                )
                 selected = True
 
         if not selected:
             first_axis = self._find_first_input("axis")
-            self.source_combo.setCurrentIndex(first_axis if first_axis >= 0 else 0)
+            self.source_combo.setCurrentIndex(
+                first_axis if first_axis >= 0 else 0
+            )
 
         self.source_combo.blockSignals(False)
 
     def _find_first_input(self, source_type: str) -> int:
         for index in range(self.source_combo.count()):
             data = self.source_combo.itemData(index)
-            if isinstance(data, tuple) and len(data) == 5 and data[1] == source_type:
+            if (
+                isinstance(data, tuple)
+                and len(data) == 5
+                and data[1] == source_type
+            ):
                 return index
         return -1
 
@@ -182,7 +220,9 @@ class MappingPage(BaseMappingPage):
             return
 
         current = self._mappings[self._current_index]
-        role = str(self.device_combo.currentData() or "primary_stick")
+        role = str(
+            self.device_combo.currentData() or "primary_stick"
+        )
         wanted = (
             role,
             current.source_type,
@@ -192,14 +232,16 @@ class MappingPage(BaseMappingPage):
         )
         self._populate_inputs_for_role(role, wanted)
         self.learn_status.setText(
-            f"Using {self.device_combo.currentText()}. Choose one of its inputs."
+            f"Using {self.device_combo.currentText()}. "
+            "Choose one of its inputs."
         )
         self._editor_changed()
 
     def _load_editor(self, mapping: ChannelMapping) -> None:
         super()._load_editor(mapping)
         self.learn_status.setText(
-            "Device and input are selected independently. Learn Input can detect both."
+            "Device and input are selected independently. "
+            "Learn Input can detect both."
         )
 
     def _clear_editor(self) -> None:
@@ -208,12 +250,11 @@ class MappingPage(BaseMappingPage):
             self.device_combo.clear()
 
     def channel_source_summary(self) -> dict[str, Any]:
-        """Expose the selected source for UI smoke tests and diagnostics."""
+        """Expose the selected source for UI tests and diagnostics."""
 
-        source = self.source_combo.currentData()
         return {
             "role": self.device_combo.currentData(),
             "device_text": self.device_combo.currentText(),
             "input_text": self.source_combo.currentText(),
-            "source": source,
+            "source": self.source_combo.currentData(),
         }
