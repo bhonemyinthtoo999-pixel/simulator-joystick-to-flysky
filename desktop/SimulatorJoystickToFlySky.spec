@@ -10,7 +10,10 @@ from PyInstaller.utils.hooks import (
 pygame_binaries = collect_dynamic_libs("pygame")
 pygame_data = collect_data_files("pygame", include_py_files=False)
 pygame_hiddenimports = collect_submodules("pygame")
-application_data = [("assets/app_icon.svg", "assets")]
+application_data = [
+    ("assets/app_icon.svg", "assets"),
+    ("assets/SimulatorJoystickToFlySky.png", "assets"),
+]
 
 analysis = Analysis(
     ["run_app.py"],
