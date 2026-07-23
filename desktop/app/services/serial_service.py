@@ -123,6 +123,16 @@ class SerialService(QObject):
             self.connection_changed.emit(False, "Disconnected")
 
     def connect_simulator(self) -> None:
+        # The simulator is an offline adapter replacement, not a visual monitor.
+        # Never let it steal an active physical COM connection because doing so
+        # stops LIVE_CHANNELS and forces the Arduino trainer output into failsafe.
+        if self._serial is not None and self._serial.is_open:
+            self.transport_error.emit(
+                "Offline simulator was not started because a physical adapter is active. "
+                "Use the Dashboard live transmitter monitor to watch the real AETR output without interrupting PPM."
+            )
+            return
+
         self.disconnect()
         self._simulated = True
         self._simulated_channels = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
