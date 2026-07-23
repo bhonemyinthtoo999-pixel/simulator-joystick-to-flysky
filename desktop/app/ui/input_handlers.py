@@ -103,7 +103,12 @@ class InputHandlersMixin:
         *,
         keepalive_only: bool = False,
     ) -> None:
-        if not self.serial_service.connected or self._stream_paused_for_test:
+        command_paused = bool(getattr(self, "_stream_paused_for_command", False))
+        if (
+            not self.serial_service.connected
+            or self._stream_paused_for_test
+            or command_paused
+        ):
             return
 
         now = time.monotonic()
@@ -177,7 +182,12 @@ class InputHandlersMixin:
             )
             self.mapping_page.update_preview(preview_channels)
 
-        streaming = self.serial_service.connected and not self._stream_paused_for_test
+        command_paused = bool(getattr(self, "_stream_paused_for_command", False))
+        streaming = (
+            self.serial_service.connected
+            and not self._stream_paused_for_test
+            and not command_paused
+        )
         if self.pages.currentWidget() is self.device_page:
             self.device_page.update_desktop_channels(channels, streaming)
 
