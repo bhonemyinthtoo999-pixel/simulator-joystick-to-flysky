@@ -2,13 +2,49 @@
 
 The desktop application combines one or more USB flight controls, calibrates each device and streams final safe RC channels to an ESP32-S3 or Arduino bridge.
 
+## Ready-to-use first run
+
+Version 0.8 introduces a product-facing setup assistant. A new user can follow this flow without editing Python files or manually constructing serial commands:
+
+```text
+Connect flight controls
+→ Detect the adapter
+→ Install Arduino firmware
+→ Calibrate each device
+→ Map AETR
+→ Verify strict failsafe
+→ READY TO USE
+```
+
+The Dashboard always shows one clear state:
+
+- **READY TO USE** — physical controls, calibration, AETR mapping, adapter and strict failsafe are ready.
+- **SETUP REQUIRED** — the next required action is shown with a button that opens the correct page.
+
+The setup assistant can be reopened from the Dashboard at any time.
+
+## Windows packaged application
+
+The packaged Windows x64 build includes:
+
+- the complete PySide6 desktop application and Python runtime
+- the application icon and Qt/pygame dependencies
+- precompiled Arduino UNO/Nano and Mega bridge firmware
+- a bundled firmware flashing tool used by the setup assistant
+- the original Arduino sketches for advanced/manual installation
+
+Python and Arduino IDE are not required for normal end-user setup. The user must still select the correct board and COM port before flashing. The application asks for confirmation because firmware installation replaces the sketch currently stored on the selected board.
+
 ## Requirements
 
 - Windows 10 or newer
-- Python 3.10–3.13, 64-bit recommended
-- A physical joystick is optional
+- A USB flight stick, throttle, pedals or other Windows game controller
+- Arduino UNO/Nano, Mega 2560 or a supported ESP32-S3 adapter for physical trainer output
+- A FlySky transmitter with a compatible trainer input
 
-## Install and run
+Python 3.10–3.13 is needed only when running from source.
+
+## Install and run from source
 
 From the repository's `desktop` directory:
 
@@ -21,6 +57,8 @@ python -m app.main
 ```
 
 The command prompt must show that the current directory ends in `simulator-joystick-to-flysky\desktop`.
+
+A source/development run may not include the bundled `avrdude` and precompiled HEX files. In that case the setup assistant explains that the packaged Windows build or Arduino IDE is required for firmware installation.
 
 ## Separate stick and throttle
 
@@ -65,6 +103,27 @@ When enabled, CH1–CH4 are treated as one safety group. If any configured AETR 
 
 Auxiliary channels continue to use their own source/failsafe settings. The Arduino firmware also applies its independent 700 ms serial timeout.
 
+## One-click Arduino firmware installation
+
+The setup assistant supports these targets:
+
+```text
+Arduino UNO / compatible ATmega328P        115200 baud, PPM D9
+Arduino Nano — new bootloader              115200 baud, PPM D9
+Arduino Nano — old bootloader               57600 baud, PPM D9
+Arduino Mega 2560 / compatible ATmega2560  115200 baud, PPM D11
+```
+
+The Windows release compiles the firmware from the repository source during GitHub Actions, then bundles the generated HEX files and the Arduino AVR `avrdude` package. The app invokes the tool directly without a command shell and never guesses a blank board model silently.
+
+Before flashing:
+
+1. Remove aircraft and motor power.
+2. Close Arduino Serial Monitor and any program using the COM port.
+3. Select the exact board/bootloader and COM port.
+4. Keep the USB cable connected until the installation finishes.
+5. Wait for the app to reconnect and identify the board.
+
 ## Adapter & Hardware Test center
 
 The **Adapter / Firmware** page is the final software-side check before connecting the FlySky trainer port.
@@ -98,20 +157,20 @@ CH4 = 1500 µs
 
 8. The normal live stream resumes automatically after PASS, FAIL, timeout or manual Abort.
 
-A periodic status packet that arrives before the 700 ms deadline is ignored by the test state machine, preventing false results.
-
 ## Test without hardware
 
-1. Start the app; Demo Flight Joystick is enabled by default.
+1. Enable the Demo Flight Joystick under **Settings**.
 2. Open **Joystick Monitor** to see animated input.
 3. Open **Calibration** and exercise the workflow.
-4. Open **Channel Mapping** and test role binding, explicit Device/Input selection, Learn Input and Auto-map AETR.
+4. Open **Channel Mapping** and test role binding, Device/Input selection, Learn Input and Auto-map AETR.
 5. Open **Profiles** to create, duplicate, activate, import and export profiles.
 6. Open **Adapter / Firmware** and click **Test simulator**.
-7. Tick the safety confirmation and run the guided failsafe test. The simulator models the same 700 ms desktop-stream timeout.
+7. Run the guided failsafe test with aircraft power disconnected.
 8. Open **Diagnostics** to inspect protocol and transport statistics.
 
-## Arduino bridges
+The readiness Dashboard intentionally does not treat the demo joystick or software simulator as physical flight-ready hardware.
+
+## Arduino bridge source
 
 UNO/Nano sketch:
 
@@ -125,34 +184,27 @@ Mega 2560 sketch:
 firmware/arduino-mega/simjoy_mega_bridge/simjoy_mega_bridge.ino
 ```
 
-For either board:
-
-1. Upload the appropriate sketch with Arduino IDE.
-2. Close Serial Monitor.
-3. Open **Adapter / Firmware**.
-4. Select the Arduino COM port and `115200` baud.
-5. Click **Connect COM** and wait for the board reset/handshake.
-6. Confirm Desktop and Adapter channel values match.
-7. Run the guided communication failsafe test.
-8. Keep the desktop application running while using an Arduino bridge.
-
-Arduino receives final `LIVE_CHANNELS` values. Calibration, role binding, mapping and profiles remain on the PC.
+Arduino receives final channel values. Calibration, role binding, mapping and profiles remain on the PC.
 
 ## Physical joystick support
 
 The app uses SDL DirectInput as the primary Windows backend and WinMM as a legacy fallback. It supports many modern and older flight sticks, throttles, gamepads, wheels and RC simulator controllers that appear in Windows Game Controllers.
 
-## Data files
+## Data and privacy
 
-User configuration is stored under:
+No account is required. Joystick input, profiles, calibration and settings remain local under:
 
 ```text
 %USERPROFILE%\.simulator-joystick-to-flysky\
 ```
 
+Files:
+
 - `settings.json`
 - `profiles.json`
 - `calibrations.json`
+
+The application does not upload joystick values or profiles. Diagnostics are exported only when the user explicitly chooses to create a report.
 
 ## Tests
 
@@ -161,12 +213,18 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-GitHub Actions runs the desktop test suite on Python 3.10 and 3.12. The suite includes UI smoke tests, device-axis mapping, protocol framing, multi-device channel mapping and simulated communication failsafe behavior.
+GitHub Actions runs the desktop test suite on Python 3.10 and 3.12. The suite includes UI smoke tests, readiness decisions, firmware command generation, device-axis mapping, protocol framing, multi-device channel mapping and simulated communication failsafe behavior.
 
-## Build a Windows executable
+## Build a Windows application
 
 ```bat
 build_windows.bat
 ```
 
-The executable is created under `dist\SimulatorJoystickToFlySky\`.
+The executable is created under:
+
+```text
+dist\SimulatorJoystickToFlySky\
+```
+
+Keep the complete folder together. The one-click firmware feature is included in official GitHub Windows builds; local builds also require Arduino CLI and the Arduino AVR core/tool package to prepare firmware installer assets.
