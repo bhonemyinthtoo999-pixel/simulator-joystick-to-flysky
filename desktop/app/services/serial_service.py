@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import time
 from typing import Any
 
 import serial
@@ -35,8 +36,11 @@ class SerialService(QObject):
         self._connected_label = "Disconnected"
         self._simulated = False
         self._simulated_profile: dict[str, Any] | None = None
-        self._simulated_channels = [1500] * 8
+        self._simulated_channels = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
         self._simulated_pending: deque[tuple[MessageType, int, dict[str, Any]]] = deque()
+        self._simulated_last_channels_at = 0.0
+        self._simulated_stream_active = False
+        self._simulated_timeout_s = 0.7
         self._tx_frames = 0
         self._tx_bytes = 0
         self._rx_bytes = 0
@@ -115,6 +119,9 @@ class SerialService(QObject):
     def connect_simulator(self) -> None:
         self.disconnect()
         self._simulated = True
+        self._simulated_channels = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
+        self._simulated_last_channels_at = 0.0
+        self._simulated_stream_active = False
         self._connected_label = "Built-in ESP32-S3 simulator"
         self.connection_changed.emit(True, self._connected_label)
         self._sim_status_timer.start()
@@ -123,6 +130,8 @@ class SerialService(QObject):
     def disconnect(self) -> None:
         self._sim_status_timer.stop()
         self._simulated = False
+        self._simulated_stream_active = False
+        self._simulated_last_channels_at = 0.0
         self._simulated_pending.clear()
         if self._serial is not None:
             try:
@@ -198,20 +207,30 @@ class SerialService(QObject):
             response = {
                 "protocol_major": PROTOCOL_MAJOR,
                 "protocol_minor": PROTOCOL_MINOR,
-                "firmware_version": "0.1.0-simulator",
+                "firmware_version": "0.2.0-simulator",
                 "board": "ESP32-S3 N16R8 (simulated)",
-                "hardware_revision": "SIM-1",
-                "capabilities": ["usb_hid_host", "ppm", "profiles", "desktop_stream", "diagnostics"],
+                "hardware_revision": "SIM-2",
+                "capabilities": [
+                    "usb_hid_host",
+                    "ppm",
+                    "profiles",
+                    "desktop_stream",
+                    "diagnostics",
+                    "failsafe",
+                ],
             }
         elif kind == MessageType.DEVICE_INFO:
             response_kind = MessageType.DEVICE_INFO
             response = {
                 "board": "ESP32-S3 N16R8 (simulated)",
-                "firmware_version": "0.1.0-simulator",
+                "firmware_version": "0.2.0-simulator",
                 "ppm_gpio": 4,
-                "joystick_connected": True,
+                "mode": "desktop_stream_simulator",
                 "active_profile": (self._simulated_profile or {}).get("name", "Default"),
             }
+        elif kind == MessageType.STATUS:
+            response_kind = MessageType.STATUS
+            response = self._simulated_status_payload()
         elif kind == MessageType.PROFILE_VALIDATE:
             profile = payload.get("profile", {})
             errors = self._validate_simulated_profile(profile)
@@ -232,8 +251,12 @@ class SerialService(QObject):
             channels = payload.get("channels", [])
             if isinstance(channels, list) and channels:
                 self._simulated_channels = [max(800, min(2200, int(value))) for value in channels[:16]]
+                self._simulated_last_channels_at = time.monotonic()
+                self._simulated_stream_active = True
             return
         elif kind == MessageType.REBOOT:
+            self._simulated_stream_active = False
+            self._simulated_last_channels_at = 0.0
             response = {"ok": True, "request": kind.name, "message": "Simulator rebooted"}
         elif kind == MessageType.BOOTLOADER:
             response = {"ok": True, "request": kind.name, "message": "Simulator entered bootloader mode"}
@@ -252,6 +275,26 @@ class SerialService(QObject):
             errors.append("mapping count must match channel_count")
         return errors
 
+    def _simulated_status_payload(self) -> dict[str, Any]:
+        now = time.monotonic()
+        age_s = now - self._simulated_last_channels_at if self._simulated_last_channels_at else 0.0
+        if self._simulated_stream_active and age_s > self._simulated_timeout_s:
+            count = max(4, len(self._simulated_channels))
+            self._simulated_channels = [1000 if index == 2 else 1500 for index in range(count)]
+            self._simulated_stream_active = False
+        failsafe_active = not self._simulated_stream_active
+        return {
+            "uptime_ms": int(now * 1000),
+            "joystick_connected": self._simulated_stream_active,
+            "stream_active": self._simulated_stream_active,
+            "failsafe_active": failsafe_active,
+            "stream_age_ms": int(age_s * 1000),
+            "ppm_active": True,
+            "channels": list(self._simulated_channels),
+            "active_profile": (self._simulated_profile or {}).get("name", "Default"),
+            "faults": ["desktop_stream_timeout"] if failsafe_active else [],
+        }
+
     def _deliver_simulated(self, kind: MessageType, sequence: int, payload: dict[str, Any]) -> None:
         encoded = FrameCodec.encode(kind, sequence, payload)
         self._rx_bytes += len(encoded)
@@ -262,15 +305,7 @@ class SerialService(QObject):
     def _emit_simulated_status(self) -> None:
         if not self._simulated:
             return
-        payload = {
-            "uptime_ms": 0,
-            "joystick_connected": True,
-            "ppm_active": True,
-            "channels": self._simulated_channels,
-            "active_profile": (self._simulated_profile or {}).get("name", "Default"),
-            "faults": [],
-        }
-        self._deliver_simulated(MessageType.STATUS, 0, payload)
+        self._deliver_simulated(MessageType.STATUS, 0, self._simulated_status_payload())
 
     def _emit_stats(self) -> None:
         stats = self._parser.stats()
