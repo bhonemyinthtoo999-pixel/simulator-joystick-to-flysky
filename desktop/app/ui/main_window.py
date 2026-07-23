@@ -26,7 +26,7 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Simulator Joystick to FlySky")
-        self.resize(1380, 820)
+        self.resize(1380, 860)
 
         self.settings_store = SettingsStore()
         self.settings = self.settings_store.load()
@@ -50,6 +50,8 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self._selected_profile_id: str | None = self.profile_collection.active_profile_id
         self._adapter_kind = "disconnected"
         self._adapter_capabilities: set[str] = set()
+        self._stream_paused_for_test = False
+        self._failsafe_test_active = False
 
         self.dashboard_page = DashboardPage()
         self.joystick_page = JoystickPage()
@@ -140,6 +142,7 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self.device_page.upload_requested.connect(self._upload_active_profile)
         self.device_page.reboot_requested.connect(lambda: self.serial_service.send(MessageType.REBOOT, {}))
         self.device_page.bootloader_requested.connect(lambda: self.serial_service.send(MessageType.BOOTLOADER, {}))
+        self.device_page.failsafe_test_requested.connect(self._start_failsafe_test)
 
         self.serial_service.ports_changed.connect(self._on_ports_changed)
         self.serial_service.connection_changed.connect(self._on_connection_changed)
