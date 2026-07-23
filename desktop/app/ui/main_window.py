@@ -197,7 +197,7 @@ class MainWindow(
         self.profiles_page.export_requested.connect(self._export_profile)
 
         self.device_page.refresh_requested.connect(
-            self.serial_service.scan_ports
+            self.serial_service.force_scan_ports
         )
         self.device_page.connect_requested.connect(self._connect_serial)
         self.device_page.simulator_requested.connect(self._connect_simulator)
