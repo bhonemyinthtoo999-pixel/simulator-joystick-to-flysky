@@ -3,7 +3,7 @@ from .page_dashboard import DashboardPage
 from .page_device import DevicePage
 from .page_diagnostics import DiagnosticsPage
 from .page_joystick import JoystickPage
-from .page_mapping import MappingPage
+from .page_mapping_device_editor import MappingPage
 from .page_profiles import ProfilesPage
 from .page_settings import SettingsPage
 
