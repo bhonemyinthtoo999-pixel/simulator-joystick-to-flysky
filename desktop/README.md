@@ -38,7 +38,7 @@ Recommended setup:
 3. Select the separate throttle, repeat calibration and save it under the throttle GUID.
 4. Open **Channel Mapping**.
 5. Bind `Primary Stick` to the stick and `Throttle Unit` to the separate throttle.
-6. Leave Pedals and Auxiliary on Auto-detect unless those devices are present.
+6. Select each RC channel and choose its **Device** and **Input** explicitly, or use **Learn Input**.
 7. Run **Auto-map AETR** and follow Roll, Pitch, Throttle and Yaw prompts.
 8. Verify channel direction and endpoints, then save changes.
 9. Disconnect either required device and confirm strict AETR failsafe sets CH1–CH4 to safe values.
@@ -65,15 +65,51 @@ When enabled, CH1–CH4 are treated as one safety group. If any configured AETR 
 
 Auxiliary channels continue to use their own source/failsafe settings. The Arduino firmware also applies its independent 700 ms serial timeout.
 
+## Adapter & Hardware Test center
+
+The **Adapter / Firmware** page is the final software-side check before connecting the FlySky trainer port.
+
+It shows:
+
+- detected board and firmware version
+- COM transport and connection state
+- Arduino UNO D9, Mega D11 or ESP32 PPM output information
+- Desktop target values beside firmware-received values
+- MATCH or pulse difference for CH1–CH8
+- adapter status age and stream/failsafe state
+- raw handshake, status, ACK and error payloads
+
+### Guided communication failsafe test
+
+1. Remove the propeller and disconnect motor/aircraft power.
+2. Connect and identify the Arduino bridge, or use the built-in simulator first.
+3. Confirm that normal Desktop and Adapter values match.
+4. Tick the safety confirmation checkbox.
+5. Click **Run failsafe test**.
+6. The app pauses `LIVE_CHANNELS` beyond the firmware 700 ms timeout.
+7. It requests firmware status and verifies:
+
+```text
+CH1 = 1500 µs
+CH2 = 1500 µs
+CH3 = 1000 µs
+CH4 = 1500 µs
+```
+
+8. The normal live stream resumes automatically after PASS, FAIL, timeout or manual Abort.
+
+A periodic status packet that arrives before the 700 ms deadline is ignored by the test state machine, preventing false results.
+
 ## Test without hardware
 
 1. Start the app; Demo Flight Joystick is enabled by default.
 2. Open **Joystick Monitor** to see animated input.
 3. Open **Calibration** and exercise the workflow.
-4. Open **Channel Mapping** and test role binding, Learn Input and Auto-map AETR.
+4. Open **Channel Mapping** and test role binding, explicit Device/Input selection, Learn Input and Auto-map AETR.
 5. Open **Profiles** to create, duplicate, activate, import and export profiles.
-6. Open **Adapter / Firmware** and click **Connect ESP32 simulator**.
-7. Open **Diagnostics** to inspect protocol and transport statistics.
+6. Open **Adapter / Firmware** and click **Test simulator**.
+7. Tick the safety confirmation and run the guided failsafe test. The simulator models the same 700 ms desktop-stream timeout.
+8. Open **Diagnostics** to inspect protocol and transport statistics.
 
 ## Arduino bridges
 
@@ -95,8 +131,10 @@ For either board:
 2. Close Serial Monitor.
 3. Open **Adapter / Firmware**.
 4. Select the Arduino COM port and `115200` baud.
-5. Click **Connect serial** and wait for the board reset/handshake.
-6. Keep the desktop application running.
+5. Click **Connect COM** and wait for the board reset/handshake.
+6. Confirm Desktop and Adapter channel values match.
+7. Run the guided communication failsafe test.
+8. Keep the desktop application running while using an Arduino bridge.
 
 Arduino receives final `LIVE_CHANNELS` values. Calibration, role binding, mapping and profiles remain on the PC.
 
@@ -122,6 +160,8 @@ User configuration is stored under:
 pip install -r requirements-dev.txt
 python -m pytest -q
 ```
+
+GitHub Actions runs the desktop test suite on Python 3.10 and 3.12. The suite includes UI smoke tests, device-axis mapping, protocol framing, multi-device channel mapping and simulated communication failsafe behavior.
 
 ## Build a Windows executable
 
