@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from ..services.protocol_service import MessageType
@@ -33,6 +34,8 @@ class DeviceHandlersMixin:
             self.serial_service.connect_port(self.settings.last_port, self.settings.serial_baud)
 
     def _on_connection_changed(self, connected: bool, label: str) -> None:
+        self._stream_paused_for_test = False
+        self._failsafe_test_active = False
         if not connected:
             self._adapter_kind = "disconnected"
             self._adapter_capabilities = set()
@@ -60,15 +63,10 @@ class DeviceHandlersMixin:
 
         if "simulat" in board or current == "simulator":
             return "simulator"
-
-        # Test ATmega328-class boards before Mega 2560. A broad `"mega" in
-        # board` check is incorrect because the word ATmega also appears in
-        # `Arduino UNO/Nano ATmega328P`.
         if "arduino uno" in board or "arduino nano" in board or "atmega328" in board:
             return "arduino_uno"
         if "arduino mega" in board or "mega 2560" in board or "atmega2560" in board:
             return "arduino_mega"
-
         if "arduino" in board or "stream_only" in capabilities or "desktop_bridge" in mode:
             return "arduino"
         if "esp32" in board or "usb_hid_host" in capabilities or "profiles" in capabilities:
@@ -94,7 +92,10 @@ class DeviceHandlersMixin:
             self._record_adapter_identity(payload)
             self.device_page.show_message("Device information", payload)
         elif kind == MessageType.STATUS:
+            self.device_page.update_adapter_status(payload)
             self.device_page.show_message("Live device status", payload)
+            if self._failsafe_test_active:
+                self._finish_failsafe_test(payload)
         elif kind == MessageType.ACK:
             self.device_page.show_message("Command acknowledged", payload)
         elif kind == MessageType.ERROR:
@@ -102,6 +103,89 @@ class DeviceHandlersMixin:
             self.diagnostics.error("Device", str(payload))
         elif kind == MessageType.LOG:
             self.diagnostics.info("Firmware", str(payload.get("message", payload)))
+
+    def _start_failsafe_test(self) -> None:
+        if self._adapter_kind not in {"arduino_uno", "arduino_mega", "arduino"}:
+            QMessageBox.information(
+                self,
+                "Arduino required",
+                "Connect and identify an Arduino UNO/Nano or Mega bridge before running this test.",
+            )
+            return
+        if not self.serial_service.connected:
+            QMessageBox.warning(self, "Not connected", "Connect the Arduino serial port first.")
+            return
+        answer = QMessageBox.warning(
+            self,
+            "Safety confirmation",
+            "Remove propellers and disconnect motor power before continuing.\n\n"
+            "The desktop will pause channel streaming for about one second so the Arduino communication failsafe activates.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Ok:
+            return
+
+        self._failsafe_test_active = True
+        self._stream_paused_for_test = True
+        self.device_page.set_failsafe_test_state(
+            "waiting",
+            "Stream paused. Waiting longer than the Arduino 700 ms communication timeout…",
+            35,
+        )
+        self.diagnostics.info("Failsafe test", "LIVE_CHANNELS paused for Arduino timeout verification")
+        QTimer.singleShot(850, self._request_failsafe_status)
+        QTimer.singleShot(2200, self._failsafe_test_timeout)
+
+    def _request_failsafe_status(self) -> None:
+        if not self._failsafe_test_active:
+            return
+        self.device_page.set_failsafe_test_state(
+            "verifying",
+            "Timeout elapsed. Reading Arduino channels and comparing the safe AETR values…",
+            72,
+        )
+        self.serial_service.send(MessageType.STATUS, {})
+
+    def _finish_failsafe_test(self, payload: dict[str, Any]) -> None:
+        channels = payload.get("channels", [])
+        expected = [1500, 1500, 1000, 1500]
+        received: list[int] = []
+        if isinstance(channels, list):
+            try:
+                received = [int(value) for value in channels[:4]]
+            except (TypeError, ValueError):
+                received = []
+
+        self._failsafe_test_active = False
+        self._stream_paused_for_test = False
+        passed = len(received) == 4 and all(abs(received[i] - expected[i]) <= 5 for i in range(4))
+        if passed:
+            self.device_page.set_failsafe_test_state(
+                "pass",
+                "PASS — Arduino communication failsafe verified. Normal live streaming has resumed.",
+                100,
+            )
+            self.diagnostics.info("Failsafe test", f"PASS: Arduino returned {received}")
+        else:
+            self.device_page.set_failsafe_test_state(
+                "fail",
+                f"FAIL — expected {expected}, received {received or 'no valid channel array'}. Normal streaming has resumed.",
+                100,
+            )
+            self.diagnostics.error("Failsafe test", f"FAIL: expected {expected}, received {received}")
+
+    def _failsafe_test_timeout(self) -> None:
+        if not self._failsafe_test_active:
+            return
+        self._failsafe_test_active = False
+        self._stream_paused_for_test = False
+        self.device_page.set_failsafe_test_state(
+            "fail",
+            "FAIL — no Arduino status response was received. Normal live streaming has resumed.",
+            100,
+        )
+        self.diagnostics.error("Failsafe test", "No status response before timeout")
 
     def _upload_active_profile(self) -> None:
         if not self.serial_service.connected:
