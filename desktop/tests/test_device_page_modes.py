@@ -10,9 +10,6 @@ from app.ui.device_handlers import DeviceHandlersMixin
 from app.ui.page_device import DevicePage
 
 
-# Keep one strong Python reference for the entire test module. Constructing a
-# QApplication in a helper and discarding the return value can destroy the Qt
-# application before the following QWidget is created on CPython/PySide6.
 _TEST_APPLICATION = QApplication.instance() or QApplication([])
 
 
@@ -20,7 +17,7 @@ def application() -> QApplication:
     return _TEST_APPLICATION
 
 
-def test_uno_identity_hides_esp32_only_actions() -> None:
+def test_uno_identity_shows_d9_monitor_and_hides_esp32_actions() -> None:
     app = application()
     page = DevicePage()
     page.set_connection(True, "COM8 @ 115200")
@@ -37,14 +34,47 @@ def test_uno_identity_hides_esp32_only_actions() -> None:
     )
 
     assert page.adapter_kind == "arduino_uno"
-    assert "PPM output D9" in page.adapter_status.text()
+    assert page.ppm_card.value.text() == "D9"
     assert "profile stays on PC" in page.adapter_status.text()
     assert page.upload_button.isHidden()
     assert page.bootloader_button.isHidden()
     assert page.handshake_button.isEnabled()
     assert page.reboot_button.isEnabled()
+    assert page.failsafe_button.isEnabled()
     page.close()
     assert app is not None
+
+
+def test_channel_monitor_compares_desktop_and_adapter_values() -> None:
+    application()
+    page = DevicePage()
+    page.set_connection(True, "COM8 @ 115200")
+    page.set_adapter_identity("arduino_uno", {"board": "Arduino UNO/Nano ATmega328P", "ppm_gpio": 9})
+    page.update_desktop_channels([1500, 1475, 1000, 1520], True)
+    page.update_adapter_status(
+        {
+            "joystick_connected": True,
+            "ppm_active": True,
+            "channels": [1500, 1475, 1000, 1520],
+        }
+    )
+
+    assert page.stream_card.value.text() == "ACTIVE"
+    assert page.health_card.value.text() == "HEALTHY"
+    assert page._channel_rows[0].result.text() == "MATCH"
+    assert page._channel_rows[2].received.text() == "1000 µs"
+    page.close()
+
+
+def test_failsafe_result_state_is_visible() -> None:
+    application()
+    page = DevicePage()
+    page.set_connection(True, "COM8 @ 115200")
+    page.set_adapter_identity("arduino_uno", {"board": "Arduino UNO/Nano ATmega328P", "ppm_gpio": 9})
+    page.set_failsafe_test_state("pass", "PASS — Arduino communication failsafe verified.", 100)
+    assert page.failsafe_progress.value() == 100
+    assert "PASS" in page.failsafe_status.text()
+    page.close()
 
 
 def test_simulator_is_explicitly_a_test_target() -> None:
@@ -54,9 +84,10 @@ def test_simulator_is_explicitly_a_test_target() -> None:
 
     assert page.adapter_kind == "simulator"
     assert page.supports_profile_upload is True
-    assert "no physical Arduino" in page.adapter_status.text()
+    assert "No physical adapter" in page.adapter_status.text()
     assert not page.upload_button.isHidden()
     assert page.bootloader_button.isHidden()
+    assert not page.failsafe_button.isEnabled()
     page.close()
     assert app is not None
 
