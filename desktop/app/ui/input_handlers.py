@@ -45,9 +45,6 @@ class InputHandlersMixin:
 
     def _on_state_changed(self, snapshots: dict[int, dict[str, Any]]) -> None:
         self._latest_states = snapshots
-        # Channel Mapping observes the draft role bindings only from the channel
-        # timer. Sending active-profile states here as well could let one physical
-        # movement be observed twice under two different role configurations.
         if self._selected_instance_id is None:
             return
         state = snapshots.get(self._selected_instance_id)
@@ -108,7 +105,9 @@ class InputHandlersMixin:
         )
         self.mapping_page.update_preview(preview_channels)
 
-        if self.serial_service.connected:
+        streaming = self.serial_service.connected and not self._stream_paused_for_test
+        self.device_page.update_desktop_channels(channels, streaming)
+        if streaming:
             self.serial_service.send(
                 MessageType.LIVE_CHANNELS,
                 {
