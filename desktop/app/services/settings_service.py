@@ -9,6 +9,8 @@ from pathlib import Path
 class AppSettings:
     demo_joystick_enabled: bool = True
     channel_rate_hz: int = 50
+    realtime_rate_hz: int = 100
+    low_latency_mode: bool = True
     serial_baud: int = 115200
     auto_connect: bool = False
     auto_detect_adapter: bool = True
@@ -16,7 +18,9 @@ class AppSettings:
     log_level: str = "INFO"
 
     def validate(self) -> None:
-        self.channel_rate_hz = max(10, min(100, int(self.channel_rate_hz)))
+        self.channel_rate_hz = max(10, min(60, int(self.channel_rate_hz)))
+        self.realtime_rate_hz = max(50, min(200, int(self.realtime_rate_hz)))
+        self.low_latency_mode = bool(self.low_latency_mode)
         if self.serial_baud not in {
             9600,
             19200,
