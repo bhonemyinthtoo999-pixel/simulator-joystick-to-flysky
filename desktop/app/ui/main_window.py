@@ -25,6 +25,7 @@ from ..services.profile_service import (
 from ..services.protocol_service import MessageType
 from ..services.serial_service import SerialService
 from ..services.settings_service import SettingsStore
+from .adapter_command_handlers import AdapterCommandHandlersMixin
 from .device_handlers import DeviceHandlersMixin
 from .input_handlers import InputHandlersMixin
 from .profile_handlers import ProfileHandlersMixin
@@ -43,6 +44,7 @@ from .pages import (
 class MainWindow(
     InputHandlersMixin,
     ProfileHandlersMixin,
+    AdapterCommandHandlersMixin,
     DeviceHandlersMixin,
     QMainWindow,
 ):
@@ -90,9 +92,16 @@ class MainWindow(
         self._adapter_probe_current = ""
         self._adapter_probe_signature: tuple[str, ...] | None = None
         self._stream_paused_for_test = False
+        self._stream_paused_for_command = False
         self._failsafe_test_active = False
         self._failsafe_test_generation = 0
         self._failsafe_verify_after = 0.0
+        self._status_request_generation = 0
+        self._status_request_pending = False
+        self._status_request_retry = 0
+        self._identify_pending = False
+        self._reboot_pending = False
+        self._initial_status_scheduled = False
 
         self.dashboard_page = DashboardPage()
         self.joystick_page = JoystickPage()
@@ -200,14 +209,10 @@ class MainWindow(
         self.device_page.connect_requested.connect(self._connect_serial)
         self.device_page.simulator_requested.connect(self._connect_simulator)
         self.device_page.disconnect_requested.connect(self._disconnect_and_rescan)
-        self.device_page.hello_requested.connect(self.serial_service.request_hello)
-        self.device_page.status_requested.connect(
-            lambda: self.serial_service.send(MessageType.STATUS, {})
-        )
+        self.device_page.hello_requested.connect(self._identify_adapter)
+        self.device_page.status_requested.connect(self._request_adapter_status)
         self.device_page.upload_requested.connect(self._upload_active_profile)
-        self.device_page.reboot_requested.connect(
-            lambda: self.serial_service.send(MessageType.REBOOT, {})
-        )
+        self.device_page.reboot_requested.connect(self._reboot_adapter)
         self.device_page.bootloader_requested.connect(
             lambda: self.serial_service.send(MessageType.BOOTLOADER, {})
         )
@@ -230,9 +235,13 @@ class MainWindow(
             self.diagnostics_page.set_stats
         )
 
-        self.diagnostics.entry_added.connect(self.diagnostics_page.add_entry)
+        self.diagnostics.entry_added.connect(
+            self.diagnostics_page.add_entry
+        )
         self.diagnostics.cleared.connect(self.diagnostics_page.clear)
-        self.diagnostics_page.clear_requested.connect(self.diagnostics.clear)
+        self.diagnostics_page.clear_requested.connect(
+            self.diagnostics.clear
+        )
         self.diagnostics_page.export_requested.connect(
             self._export_diagnostics
         )
@@ -289,7 +298,9 @@ class MainWindow(
     def closeEvent(self, event: Any) -> None:
         self._cancel_adapter_probe()
         self._stream_paused_for_test = False
+        self._stream_paused_for_command = False
         self._failsafe_test_active = False
+        self._status_request_pending = False
         self.channel_timer.stop()
         self.joystick_service.stop()
         self.serial_service.stop()
