@@ -252,6 +252,44 @@ class MainWindow(
         )
         self.settings_page.save_requested.connect(self._save_settings)
 
+    def _connect_simulator(self) -> None:
+        """Allow simulator testing, but give physical hardware priority."""
+
+        super()._connect_simulator()
+        if self.settings.auto_detect_adapter:
+            QTimer.singleShot(250, self.serial_service.force_scan_ports)
+
+    def _on_ports_changed(self, ports: list[dict[str, Any]]) -> None:
+        """Replace a simulator session when a physical adapter is available."""
+
+        if self.serial_service.simulated and self.settings.auto_detect_adapter:
+            candidates = self._adapter_port_candidates(ports)
+            if candidates:
+                self._adapter_probe_signature = tuple(
+                    str(item.get("device", "")) for item in ports
+                )
+                self._adapter_probe_generation += 1
+                generation = self._adapter_probe_generation
+                self._adapter_probe_ports = candidates
+                self._adapter_probe_current = ""
+                self._adapter_probe_active = True
+                self.dashboard_page.set_adapter_state(
+                    "serial_unknown",
+                    connection="Physical adapter found; leaving test simulator",
+                )
+                self.diagnostics.info(
+                    "Adapter auto-detect",
+                    "Physical serial adapter detected while the simulator was active; switching to hardware",
+                )
+                self.serial_service.disconnect()
+                QTimer.singleShot(
+                    120,
+                    lambda token=generation: self._probe_next_adapter(token),
+                )
+                return
+
+        super()._on_ports_changed(ports)
+
     def _refresh_adapter_ports(self) -> None:
         self._adapter_probe_signature = None
         self.serial_service.force_scan_ports()
