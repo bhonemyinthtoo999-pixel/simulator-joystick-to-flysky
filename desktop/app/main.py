@@ -6,13 +6,7 @@ import traceback
 
 
 def _configure_windows_joystick_backend() -> str:
-    """Configure SDL before pygame is imported by the UI services.
-
-    Windows flight sticks such as the Thrustmaster T.16000M can be enumerated
-    through SDL HIDAPI/WGI while returning frozen axis values. DirectInput is a
-    more reliable default for this flight-controller application. Set
-    SIMJOY_INPUT_BACKEND=auto to restore SDL's automatic backend selection.
-    """
+    """Configure SDL before pygame is imported by the UI services."""
 
     os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
     default_mode = "directinput" if sys.platform == "win32" else "auto"
@@ -30,7 +24,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui.main_window import MainWindow
 
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.5.0"
 
 
 def main() -> int:
@@ -41,7 +35,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "multi-device-aetr-explicit-device-axis-mapping",
+        "multi-device-aetr-adapter-monitor-failsafe-test",
     )
 
     def show_unhandled_exception(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
