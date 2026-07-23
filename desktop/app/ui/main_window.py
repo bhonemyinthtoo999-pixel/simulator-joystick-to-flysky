@@ -26,7 +26,7 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Simulator Joystick to FlySky")
-        self.resize(1380, 860)
+        self.resize(1380, 880)
 
         self.settings_store = SettingsStore()
         self.settings = self.settings_store.load()
@@ -52,6 +52,8 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self._adapter_capabilities: set[str] = set()
         self._stream_paused_for_test = False
         self._failsafe_test_active = False
+        self._failsafe_test_generation = 0
+        self._failsafe_verify_after = 0.0
 
         self.dashboard_page = DashboardPage()
         self.joystick_page = JoystickPage()
@@ -139,10 +141,12 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self.device_page.simulator_requested.connect(self.serial_service.connect_simulator)
         self.device_page.disconnect_requested.connect(self.serial_service.disconnect)
         self.device_page.hello_requested.connect(self.serial_service.request_hello)
+        self.device_page.status_requested.connect(lambda: self.serial_service.send(MessageType.STATUS, {}))
         self.device_page.upload_requested.connect(self._upload_active_profile)
         self.device_page.reboot_requested.connect(lambda: self.serial_service.send(MessageType.REBOOT, {}))
         self.device_page.bootloader_requested.connect(lambda: self.serial_service.send(MessageType.BOOTLOADER, {}))
         self.device_page.failsafe_test_requested.connect(self._start_failsafe_test)
+        self.device_page.failsafe_abort_requested.connect(self._abort_failsafe_test)
 
         self.serial_service.ports_changed.connect(self._on_ports_changed)
         self.serial_service.connection_changed.connect(self._on_connection_changed)
@@ -157,6 +161,8 @@ class MainWindow(InputHandlersMixin, ProfileHandlersMixin, DeviceHandlersMixin, 
         self.settings_page.save_requested.connect(self._save_settings)
 
     def closeEvent(self, event: Any) -> None:
+        self._stream_paused_for_test = False
+        self._failsafe_test_active = False
         self.channel_timer.stop()
         self.joystick_service.stop()
         self.serial_service.stop()
