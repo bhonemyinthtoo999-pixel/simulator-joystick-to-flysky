@@ -40,9 +40,9 @@ INPUT_BACKEND_MODE = _configure_windows_joystick_backend()
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .icon_resources import application_icon
-from .ui.main_window_localized import MainWindow
+from .ui.main_window_polished import MainWindow
 
-APP_VERSION = "0.8.3"
+APP_VERSION = "0.8.4"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "responsive-bilingual-help-hardware-validation-support-package",
+        "colorful-raised-responsive-bilingual-help-validation-support",
     )
 
     def show_unhandled_exception(
