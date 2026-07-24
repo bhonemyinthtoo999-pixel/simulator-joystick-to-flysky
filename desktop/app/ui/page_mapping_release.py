@@ -81,7 +81,7 @@ class MappingPage(_FinalMappingPage):
         self.reverse_box.setText("Reverse")
         self.learn_status.setWordWrap(False)
         self.learn_status.setMaximumHeight(24)
-        compact.setMaximumHeight(126)
+        compact.setMaximumHeight(136)
 
     def _rebuild_release_editor(self) -> None:
         scroll = getattr(self, "_editor_scroll", None)
@@ -104,22 +104,21 @@ class MappingPage(_FinalMappingPage):
         if self._compact_identity is not None:
             editor_layout.addWidget(self._compact_identity)
 
-        groups = {group.title(): group for group in content.findChildren(QGroupBox)}
-        quick = groups.get("Quick setup")
-        preview = groups.get("Live combined preview")
-        old_endpoints = groups.get("Output endpoints and safety")
-        old_tuning = groups.get("Response tuning")
-        if old_endpoints is not None and old_endpoints is not self._compact_endpoints:
-            old_endpoints.hide()
-        if old_tuning is not None and old_tuning is not self._compact_tuning:
-            old_tuning.hide()
+        all_groups = content.findChildren(QGroupBox)
+        quick = next((g for g in all_groups if g.title() == "Quick setup"), None)
+        preview = next((g for g in all_groups if g.title() == "Live combined preview"), None)
+        for group in all_groups:
+            if group.title() == "Output endpoints and safety":
+                group.hide()
+            elif group.title() == "Response tuning" and group is not self._compact_tuning:
+                group.hide()
 
         lower = QGridLayout()
         lower.setContentsMargins(0, 0, 0, 0)
         lower.setHorizontalSpacing(7)
         lower.setVerticalSpacing(5)
         if quick is not None:
-            quick.setMaximumHeight(68)
+            quick.setMaximumHeight(74)
             lower.addWidget(quick, 0, 0)
         lower.addWidget(self._compact_tuning, 0, 1)
         lower.addWidget(self._compact_endpoints, 1, 0)
