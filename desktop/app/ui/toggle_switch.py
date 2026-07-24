@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPalette
+from PySide6.QtCore import QLineF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy
 
 
@@ -42,9 +42,13 @@ class ToggleSwitch(QAbstractButton):
             knob_color = palette.color(QPalette.ColorRole.Base)
 
         if focused and enabled:
-            painter.setPen(QColor("#38bdf8"))
+            painter.setPen(QPen(QColor("#38bdf8"), 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(track.adjusted(-1.0, -1.0, 1.0, 1.0), radius + 1.0, radius + 1.0)
+            painter.drawRoundedRect(
+                track.adjusted(-1.0, -1.0, 1.0, 1.0),
+                radius + 1.0,
+                radius + 1.0,
+            )
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(track_color)
@@ -62,17 +66,22 @@ class ToggleSwitch(QAbstractButton):
         painter.drawEllipse(knob)
 
         if checked and enabled:
-            painter.setPen(QColor("#4f46e5"))
+            painter.setPen(QPen(QColor("#4f46e5"), 1.7))
             painter.setBrush(Qt.BrushStyle.NoBrush)
+            center = knob.center()
             painter.drawLine(
-                knob.center().x() - 4.0,
-                knob.center().y(),
-                knob.center().x() - 1.0,
-                knob.center().y() + 3.0,
+                QLineF(
+                    center.x() - 4.0,
+                    center.y(),
+                    center.x() - 1.0,
+                    center.y() + 3.0,
+                )
             )
             painter.drawLine(
-                knob.center().x() - 1.0,
-                knob.center().y() + 3.0,
-                knob.center().x() + 5.0,
-                knob.center().y() - 4.0,
+                QLineF(
+                    center.x() - 1.0,
+                    center.y() + 3.0,
+                    center.x() + 5.0,
+                    center.y() - 4.0,
+                )
             )
