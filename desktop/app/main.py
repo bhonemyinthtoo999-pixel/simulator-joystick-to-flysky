@@ -42,7 +42,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from .icon_resources import application_icon
 from .ui.main_window_localized import MainWindow
 
-APP_VERSION = "0.8.2"
+APP_VERSION = "0.8.3"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "ready-to-use-responsive-english-burmese-live-transmitter-monitor",
+        "responsive-bilingual-help-hardware-validation-support-package",
     )
 
     def show_unhandled_exception(
