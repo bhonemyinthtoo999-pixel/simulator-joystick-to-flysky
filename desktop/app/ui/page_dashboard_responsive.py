@@ -8,17 +8,21 @@ from .page_dashboard import DashboardPage as _BaseDashboardPage
 
 
 class DashboardPage(_BaseDashboardPage):
-    """Responsive product dashboard with runtime English/Burmese switching."""
+    """Responsive colorful dashboard with runtime English/Burmese switching."""
 
     def __init__(self) -> None:
         self._language = "en"
         self._last_adapter_state: tuple[str, str, str] = ("disconnected", "", "")
         super().__init__()
+        self.hero.setProperty("uiCard", True)
         self._status_cards = (
             self.device_heading.parentWidget(),
             self.joystick_heading.parentWidget(),
             self.profile_heading.parentWidget(),
         )
+        for card in self._status_cards:
+            if card is not None:
+                card.setProperty("uiCard", True)
         self._status_layout = self._find_box_layout_with_widgets(self._status_cards)
         self._content_layout = self._find_content_layout()
         self._last_checklist_columns = 0
@@ -52,6 +56,39 @@ class DashboardPage(_BaseDashboardPage):
 
     def set_readiness(self, report: ReadinessReport) -> None:
         super().set_readiness(report)
+        if report.ready:
+            self.hero.setStyleSheet(
+                "QFrame#readinessHero { border: 2px solid #34d399; border-radius: 18px; "
+                "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                "stop:0 #064e3b, stop:0.48 #0f766e, stop:1 #2563eb); }"
+            )
+            self.readiness_title.setStyleSheet(
+                "font-size: 30px; font-weight: 850; color: white;"
+            )
+            self.readiness_eyebrow.setStyleSheet(
+                "font-size: 10px; font-weight: 750; color: #d1fae5; letter-spacing: 1px;"
+            )
+            self.readiness_summary.setStyleSheet("font-size: 13px; color: #ecfeff;")
+            self.readiness_button.setProperty("buttonRole", "success")
+        else:
+            self.hero.setStyleSheet(
+                "QFrame#readinessHero { border: 2px solid #fbbf24; border-radius: 18px; "
+                "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                "stop:0 #312e81, stop:0.5 #7c3aed, stop:1 #db2777); }"
+            )
+            self.readiness_title.setStyleSheet(
+                "font-size: 30px; font-weight: 850; color: white;"
+            )
+            self.readiness_eyebrow.setStyleSheet(
+                "font-size: 10px; font-weight: 750; color: #fef3c7; letter-spacing: 1px;"
+            )
+            self.readiness_summary.setStyleSheet("font-size: 13px; color: #fff7ed;")
+            self.readiness_button.setProperty("buttonRole", "warning")
+        self.setup_button.setProperty("buttonRole", "secondary")
+        for button in (self.readiness_button, self.setup_button):
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
         apply_widget_language(self, self._language)
         self._apply_responsive_layout()
 
@@ -81,8 +118,6 @@ class DashboardPage(_BaseDashboardPage):
             streaming=streaming,
             failsafe=failsafe,
         )
-        # This section has only a few widgets, so translating after its UI-rate
-        # update is inexpensive and keeps dynamic LIVE/FAILSAFE text bilingual.
         apply_widget_language(self.transmitter_monitor, self._language)
 
     def resizeEvent(self, event: object) -> None:
