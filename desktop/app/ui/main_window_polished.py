@@ -5,18 +5,22 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .main_window_localized import MainWindow as _LocalizedMainWindow
-from .product_theme import ProductThemeController
+from .theme_presets import DynamicProductThemeController
 
 
 class MainWindow(_LocalizedMainWindow):
-    """Final product shell with colorful raised controls and polished typography."""
+    """Final product shell with selectable themes and polished typography."""
 
     def __init__(self) -> None:
-        self._theme_controller: ProductThemeController | None = None
+        self._theme_controller: DynamicProductThemeController | None = None
         super().__init__()
         app = QApplication.instance()
         if app is not None:
-            self._theme_controller = ProductThemeController(app, self)
+            self._theme_controller = DynamicProductThemeController(
+                app,
+                self,
+                getattr(self.settings, "color_theme", "aurora"),
+            )
         self._apply_shell_accents()
         self._polish_brand()
         self.navigation.currentRowChanged.connect(
@@ -28,13 +32,13 @@ class MainWindow(_LocalizedMainWindow):
         controller = self._theme_controller
         if controller is None:
             return
-        start = "#111b42" if controller.dark else "#172554"
-        middle = "#262261" if controller.dark else "#312e81"
-        end = "#48125d" if controller.dark else "#581c87"
+        colors = controller.colors
         self.navigation_panel.setStyleSheet(
-            "QFrame#productNavigationPanel { border: 0; border-right: 1px solid #6366f1; "
+            "QFrame#productNavigationPanel { border: 0; "
+            f"border-right: 1px solid {colors['primary']}; "
             "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-            f"stop:0 {start}, stop:0.52 {middle}, stop:1 {end}); }}"
+            f"stop:0 {colors['nav_start']}, stop:0.52 {colors['nav_middle']}, "
+            f"stop:1 {colors['nav_end']}); }}"
         )
 
     def _polish_brand(self) -> None:
@@ -72,6 +76,19 @@ class MainWindow(_LocalizedMainWindow):
         self._polish_brand()
         if self._theme_controller is not None:
             QTimer.singleShot(0, self._polish_visible_ui)
+
+    def _save_settings(self, payload: dict[str, object]) -> None:
+        super()._save_settings(payload)
+        controller = self._theme_controller
+        if controller is not None:
+            controller.apply_theme(getattr(self.settings, "color_theme", "aurora"))
+            self._apply_shell_accents()
+            self._polish_brand()
+            self._polish_visible_ui()
+            monitor = getattr(self.dashboard_page, "transmitter_monitor", None)
+            canvas = getattr(monitor, "canvas", None)
+            if isinstance(canvas, QWidget):
+                canvas.update()
 
     def _apply_responsive_layout(self) -> None:
         super()._apply_responsive_layout()
