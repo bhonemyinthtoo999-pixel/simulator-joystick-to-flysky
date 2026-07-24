@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtWidgets import QBoxLayout, QWidget
+from PySide6.QtWidgets import QBoxLayout, QGridLayout, QWidget
 
 from ..services.localization_service import (
     apply_widget_language,
@@ -21,6 +21,8 @@ class DevicePage(_BaseDevicePage):
         self._connection_row = self._find_layout_with_widget(self.port_combo)
         self._command_row = self._find_layout_with_widget(self.handshake_button)
         self._failsafe_row = self._find_layout_with_widget(self.failsafe_button)
+        self._status_grid = self._find_status_grid()
+        self._status_columns = 0
         self._sync_simulator_button(self.adapter_kind)
         self._apply_responsive_layout()
 
@@ -29,6 +31,18 @@ class DevicePage(_BaseDevicePage):
             for index in range(layout.count()):
                 if layout.itemAt(index).widget() is target:
                     return layout
+        return None
+
+    def _find_status_grid(self) -> QGridLayout | None:
+        targets = {self.board_card, self.stream_card, self.ppm_card, self.health_card}
+        for layout in self.findChildren(QGridLayout):
+            widgets = {
+                layout.itemAt(index).widget()
+                for index in range(layout.count())
+                if layout.itemAt(index).widget() is not None
+            }
+            if targets.issubset(widgets):
+                return layout
         return None
 
     def set_language(self, language: object) -> None:
@@ -63,6 +77,19 @@ class DevicePage(_BaseDevicePage):
                 else QBoxLayout.Direction.LeftToRight
             )
         self.port_combo.setMinimumWidth(0 if narrow else 310)
+        self._reflow_status_cards(1 if narrow else 2 if compact else 4)
+
+    def _reflow_status_cards(self, columns: int) -> None:
+        if self._status_grid is None or columns == self._status_columns:
+            return
+        cards = [self.board_card, self.stream_card, self.ppm_card, self.health_card]
+        for card in cards:
+            self._status_grid.removeWidget(card)
+        for index, card in enumerate(cards):
+            self._status_grid.addWidget(card, index // columns, index % columns)
+        for column in range(4):
+            self._status_grid.setColumnStretch(column, 1 if column < columns else 0)
+        self._status_columns = columns
 
     def _apply_adapter_mode(self, kind: str) -> None:
         super()._apply_adapter_mode(kind)
