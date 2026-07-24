@@ -17,74 +17,34 @@ THEME_CHOICES: Final[tuple[tuple[str, str], ...]] = (
 
 _THEME_COLORS: Final[dict[str, dict[str, str]]] = {
     "aurora": {
-        "primary": "#4f46e5",
-        "primary_light": "#818cf8",
-        "primary_dark": "#312e81",
-        "secondary": "#06b6d4",
-        "accent": "#a855f7",
-        "soft": "#eef2ff",
-        "page_start": "#edf4ff",
-        "page_end": "#fff4fb",
-        "nav_start": "#172554",
-        "nav_middle": "#312e81",
-        "nav_end": "#581c87",
-        "success": "#10b981",
+        "primary": "#4f46e5", "primary_light": "#818cf8", "primary_dark": "#312e81",
+        "secondary": "#06b6d4", "accent": "#a855f7", "soft": "#eef2ff",
+        "page_start": "#edf4ff", "page_end": "#fff4fb", "nav_start": "#172554",
+        "nav_middle": "#312e81", "nav_end": "#581c87", "success": "#10b981",
     },
     "ocean": {
-        "primary": "#0284c7",
-        "primary_light": "#38bdf8",
-        "primary_dark": "#075985",
-        "secondary": "#06b6d4",
-        "accent": "#2563eb",
-        "soft": "#e0f2fe",
-        "page_start": "#eaf8ff",
-        "page_end": "#edf4ff",
-        "nav_start": "#082f49",
-        "nav_middle": "#0c4a6e",
-        "nav_end": "#164e63",
-        "success": "#10b981",
+        "primary": "#0284c7", "primary_light": "#38bdf8", "primary_dark": "#075985",
+        "secondary": "#06b6d4", "accent": "#2563eb", "soft": "#e0f2fe",
+        "page_start": "#eaf8ff", "page_end": "#edf4ff", "nav_start": "#082f49",
+        "nav_middle": "#0c4a6e", "nav_end": "#164e63", "success": "#10b981",
     },
     "emerald": {
-        "primary": "#059669",
-        "primary_light": "#34d399",
-        "primary_dark": "#065f46",
-        "secondary": "#14b8a6",
-        "accent": "#22c55e",
-        "soft": "#d1fae5",
-        "page_start": "#ecfdf5",
-        "page_end": "#effdf8",
-        "nav_start": "#052e2b",
-        "nav_middle": "#064e3b",
-        "nav_end": "#14532d",
-        "success": "#16a34a",
+        "primary": "#059669", "primary_light": "#34d399", "primary_dark": "#065f46",
+        "secondary": "#14b8a6", "accent": "#22c55e", "soft": "#d1fae5",
+        "page_start": "#ecfdf5", "page_end": "#effdf8", "nav_start": "#052e2b",
+        "nav_middle": "#064e3b", "nav_end": "#14532d", "success": "#16a34a",
     },
     "sunset": {
-        "primary": "#ea580c",
-        "primary_light": "#fb923c",
-        "primary_dark": "#9a3412",
-        "secondary": "#f59e0b",
-        "accent": "#ef4444",
-        "soft": "#ffedd5",
-        "page_start": "#fff7ed",
-        "page_end": "#fff1f2",
-        "nav_start": "#431407",
-        "nav_middle": "#7c2d12",
-        "nav_end": "#881337",
-        "success": "#10b981",
+        "primary": "#ea580c", "primary_light": "#fb923c", "primary_dark": "#9a3412",
+        "secondary": "#f59e0b", "accent": "#ef4444", "soft": "#ffedd5",
+        "page_start": "#fff7ed", "page_end": "#fff1f2", "nav_start": "#431407",
+        "nav_middle": "#7c2d12", "nav_end": "#881337", "success": "#10b981",
     },
     "rose": {
-        "primary": "#db2777",
-        "primary_light": "#f472b6",
-        "primary_dark": "#9d174d",
-        "secondary": "#a855f7",
-        "accent": "#e11d48",
-        "soft": "#fce7f3",
-        "page_start": "#fff1f7",
-        "page_end": "#fdf2ff",
-        "nav_start": "#4c0519",
-        "nav_middle": "#831843",
-        "nav_end": "#581c87",
-        "success": "#10b981",
+        "primary": "#db2777", "primary_light": "#f472b6", "primary_dark": "#9d174d",
+        "secondary": "#a855f7", "accent": "#e11d48", "soft": "#fce7f3",
+        "page_start": "#fff1f7", "page_end": "#fdf2ff", "nav_start": "#4c0519",
+        "nav_middle": "#831843", "nav_end": "#581c87", "success": "#10b981",
     },
 }
 
@@ -92,16 +52,11 @@ _THEME_COLORS: Final[dict[str, dict[str, str]]] = {
 def normalize_theme(value: object) -> str:
     clean = str(value or "aurora").strip().casefold().replace(" ", "_")
     aliases = {
-        "purple": "aurora",
-        "aurora_purple": "aurora",
-        "blue": "ocean",
-        "ocean_blue": "ocean",
-        "green": "emerald",
-        "emerald_green": "emerald",
-        "orange": "sunset",
-        "sunset_orange": "sunset",
-        "pink": "rose",
-        "rose_pink": "rose",
+        "purple": "aurora", "aurora_purple": "aurora",
+        "blue": "ocean", "ocean_blue": "ocean",
+        "green": "emerald", "emerald_green": "emerald",
+        "orange": "sunset", "sunset_orange": "sunset",
+        "pink": "rose", "rose_pink": "rose",
     }
     clean = aliases.get(clean, clean)
     return clean if clean in _THEME_COLORS else "aurora"
@@ -140,8 +95,7 @@ QWidget#productAppRoot {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, {page_background});
 }}
 QFrame#productNavigationPanel {{
-    border: 0;
-    border-right: 1px solid {primary};
+    border: 0; border-right: 1px solid {primary};
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 {nav_start}, stop:0.52 {nav_middle}, stop:1 {nav_end});
 }}
@@ -151,8 +105,7 @@ QFrame#productNavigationPanel QListWidget::item:selected {{
         stop:0 {secondary}, stop:0.52 {primary}, stop:1 {accent});
 }}
 QFrame[uiCard="true"], QGroupBox[uiCard="true"] {{
-    background: {card_background};
-    border: 1px solid {primary}55;
+    background: {card_background}; border: 1px solid {light};
 }}
 QGroupBox::title {{ color: {light if dark else dark_primary}; }}
 QPushButton {{
@@ -167,28 +120,22 @@ QPushButton:hover {{
 }}
 QPushButton:pressed {{ background: {dark_primary}; }}
 QPushButton[buttonRole="secondary"] {{
-    color: {secondary_text};
-    border-color: {light};
+    color: {secondary_text}; border-color: {light};
     background: {soft if not dark else '#172033'};
 }}
 QPushButton[buttonRole="secondary"]:hover {{
-    color: {field_text};
-    border-color: {primary};
+    color: {field_text}; border-color: {primary};
     background: {light if dark else soft};
 }}
 QPushButton[buttonRole="ghost"] {{
-    color: {field_text};
-    border-color: {primary}66;
-    background: {ghost_background};
+    color: {field_text}; border-color: {light}; background: {ghost_background};
 }}
 QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{
-    color: {field_text};
-    background: {field_background};
-    border-color: {primary}66;
+    color: {field_text}; background: {field_background}; border-color: {light};
     selection-background-color: {primary};
 }}
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QPlainTextEdit:hover {{
-    border-color: {light};
+    border-color: {primary};
 }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus {{
     border: 2px solid {primary};
