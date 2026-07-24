@@ -40,9 +40,9 @@ INPUT_BACKEND_MODE = _configure_windows_joystick_backend()
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .icon_resources import application_icon
-from .ui.main_window import MainWindow
+from .ui.main_window_product import MainWindow
 
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.8.2"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "ready-to-use-live-hardware-transmitter-monitor-simulator-safety",
+        "ready-to-use-responsive-english-burmese-live-transmitter-monitor",
     )
 
     def show_unhandled_exception(
