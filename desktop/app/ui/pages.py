@@ -1,10 +1,10 @@
-from .page_calibration import CalibrationPage
+from .page_calibration_responsive import CalibrationPage
 from .page_dashboard_responsive import DashboardPage
 from .page_device_safe import DevicePage
 from .page_diagnostics import DiagnosticsPage
 from .page_joystick import JoystickPage
-from .page_mapping_device_editor import MappingPage
-from .page_profiles import ProfilesPage
+from .page_mapping_responsive import MappingPage
+from .page_profiles_responsive import ProfilesPage
 from .page_settings import SettingsPage
 
 __all__ = [
