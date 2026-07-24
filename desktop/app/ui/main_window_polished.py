@@ -23,6 +23,7 @@ class MainWindow(_LocalizedMainWindow):
             )
         self._apply_shell_accents()
         self._polish_brand()
+        self._apply_about_credit()
         self.navigation.currentRowChanged.connect(
             lambda _row: QTimer.singleShot(0, self._polish_visible_ui)
         )
@@ -51,6 +52,26 @@ class MainWindow(_LocalizedMainWindow):
             "font-size: 13px; font-weight: 800; color: #ffffff;"
         )
 
+    def _apply_about_credit(self) -> None:
+        help_page = getattr(self, "help_page", None)
+        about = getattr(help_page, "about_text", None)
+        if about is None:
+            return
+        current = about.text()
+        if "Myanmar Aero Hobbyist Association" in current:
+            return
+        if getattr(self, "_language", "en") == "my":
+            credit = (
+                "\n\nဤဆော့ဖ်ဝဲကို မြန်မာနိုင်ငံလေကြောင်းဝါသနာရှင်များအသင်း "
+                "(Myanmar Aero Hobbyist Association — MAHA) အတွက် BMH မှ "
+                "ရေးသားဖန်တီးထားခြင်းဖြစ်သည်။"
+            )
+        else:
+            credit = (
+                "\n\nDeveloped by BMH for the Myanmar Aero Hobbyist Association (MAHA)."
+            )
+        about.setText(current + credit)
+
     def _apply_application_font(self, language: str) -> None:
         app = QApplication.instance()
         if app is None:
@@ -74,6 +95,7 @@ class MainWindow(_LocalizedMainWindow):
     def _apply_language(self) -> None:
         super()._apply_language()
         self._polish_brand()
+        self._apply_about_credit()
         if self._theme_controller is not None:
             QTimer.singleShot(0, self._polish_visible_ui)
 
@@ -110,6 +132,7 @@ class MainWindow(_LocalizedMainWindow):
     def _refresh_visible_language(self) -> None:
         super()._refresh_visible_language()
         self._polish_brand()
+        self._apply_about_credit()
         if self._theme_controller is not None:
             self._theme_controller.polish_tree(self.pages.currentWidget())
             if self.setup_wizard.isVisible():
