@@ -16,10 +16,24 @@ class MainWindow(_LocalizedMainWindow):
         app = QApplication.instance()
         if app is not None:
             self._theme_controller = ProductThemeController(app, self)
+        self._apply_shell_accents()
         self.navigation.currentRowChanged.connect(
             lambda _row: QTimer.singleShot(0, self._polish_visible_ui)
         )
         self._polish_visible_ui()
+
+    def _apply_shell_accents(self) -> None:
+        controller = self._theme_controller
+        if controller is None:
+            return
+        start = "#111b42" if controller.dark else "#172554"
+        middle = "#262261" if controller.dark else "#312e81"
+        end = "#48125d" if controller.dark else "#581c87"
+        self.navigation_panel.setStyleSheet(
+            "QFrame#productNavigationPanel { border: 0; border-right: 1px solid #6366f1; "
+            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {start}, stop:0.52 {middle}, stop:1 {end}); }}"
+        )
 
     def _apply_language(self) -> None:
         super()._apply_language()
