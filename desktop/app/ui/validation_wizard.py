@@ -75,7 +75,7 @@ class HardwareValidationWizard(QDialog):
         self.auto_grid = QGridLayout()
         self.auto_grid.setHorizontalSpacing(12)
         self.auto_grid.setVerticalSpacing(12)
-        self.auto_labels: dict[str, tuple[QLabel, QLabel, QFrame]] = {}
+        self.auto_labels: dict[str, tuple[QLabel, QLabel, QLabel]] = {}
         for index, key in enumerate(("controls", "adapter", "stream", "mapping", "ppm")):
             card = QFrame()
             card.setFrameShape(QFrame.Shape.StyledPanel)
@@ -125,7 +125,6 @@ class HardwareValidationWizard(QDialog):
             "failsafe_bench",
         ):
             box = QCheckBox()
-            box.setWordWrap(True)
             box.toggled.connect(self._update_finish_state)
             layout.addWidget(box)
             self.manual_checks[key] = box
