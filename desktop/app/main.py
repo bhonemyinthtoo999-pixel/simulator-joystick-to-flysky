@@ -40,7 +40,7 @@ INPUT_BACKEND_MODE = _configure_windows_joystick_backend()
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .icon_resources import application_icon
-from .ui.main_window_product import MainWindow
+from .ui.main_window_localized import MainWindow
 
 APP_VERSION = "0.8.2"
 
