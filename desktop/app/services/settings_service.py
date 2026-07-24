@@ -16,6 +16,7 @@ class AppSettings:
     auto_detect_adapter: bool = True
     last_port: str = ""
     log_level: str = "INFO"
+    language: str = "en"
     setup_completed: bool = False
     setup_revision: int = 0
 
@@ -38,6 +39,13 @@ class AppSettings:
         self.auto_detect_adapter = bool(self.auto_detect_adapter)
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             self.log_level = "INFO"
+        self.language = "my" if str(self.language).strip().casefold() in {
+            "my",
+            "mm",
+            "burmese",
+            "myanmar",
+            "မြန်မာ",
+        } else "en"
         self.setup_completed = bool(self.setup_completed)
         self.setup_revision = max(0, int(self.setup_revision))
 
@@ -70,7 +78,7 @@ class SettingsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(
-            json.dumps(asdict(settings), indent=2),
+            json.dumps(asdict(settings), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         temporary.replace(self.path)
