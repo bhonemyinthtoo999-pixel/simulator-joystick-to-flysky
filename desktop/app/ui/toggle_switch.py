@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import QLineF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
-from PySide6.QtWidgets import QAbstractButton, QSizePolicy
+from PySide6.QtWidgets import QApplication, QAbstractButton, QSizePolicy
 
 
 class ToggleSwitch(QAbstractButton):
-    """Keyboard-accessible painted toggle that remains clear in light and dark UI."""
+    """Keyboard-accessible painted toggle that follows the selected color theme."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -19,6 +19,14 @@ class ToggleSwitch(QAbstractButton):
     def sizeHint(self) -> QSize:
         return QSize(54, 30)
 
+    @staticmethod
+    def _theme_color(key: str, fallback: str) -> QColor:
+        app = QApplication.instance()
+        payload = app.property("simjoyThemePalette") if app is not None else None
+        if isinstance(payload, dict):
+            return QColor(str(payload.get(key, fallback)))
+        return QColor(fallback)
+
     def paintEvent(self, _event: object) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -27,6 +35,8 @@ class ToggleSwitch(QAbstractButton):
         enabled = self.isEnabled()
         checked = self.isChecked()
         focused = self.hasFocus()
+        primary = self._theme_color("primary", "#4f46e5")
+        focus_color = self._theme_color("secondary", "#38bdf8")
 
         track = QRectF(1.5, 3.0, self.width() - 3.0, self.height() - 6.0)
         radius = track.height() / 2.0
@@ -35,14 +45,14 @@ class ToggleSwitch(QAbstractButton):
             track_color = palette.color(QPalette.ColorRole.Midlight)
             knob_color = palette.color(QPalette.ColorRole.Mid)
         elif checked:
-            track_color = QColor("#4f46e5")
+            track_color = primary
             knob_color = QColor("#ffffff")
         else:
             track_color = palette.color(QPalette.ColorRole.Mid)
             knob_color = palette.color(QPalette.ColorRole.Base)
 
         if focused and enabled:
-            painter.setPen(QPen(QColor("#38bdf8"), 1.5))
+            painter.setPen(QPen(focus_color, 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(
                 track.adjusted(-1.0, -1.0, 1.0, 1.0),
@@ -66,7 +76,7 @@ class ToggleSwitch(QAbstractButton):
         painter.drawEllipse(knob)
 
         if checked and enabled:
-            painter.setPen(QPen(QColor("#4f46e5"), 1.7))
+            painter.setPen(QPen(primary, 1.7))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             center = knob.center()
             painter.drawLine(
