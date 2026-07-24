@@ -19,6 +19,10 @@ permissions:
   contents: read
   statuses: write
 
+concurrency:
+  group: windows-exe-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -142,6 +146,7 @@ jobs:
 
           Start: SimulatorJoystickToFlySky.exe
           First run: follow the built-in setup assistant
+          Languages: English / မြန်မာ
           One-click firmware: UNO/Nano D9 and Mega 2560 D11
           User settings: %USERPROFILE%\.simulator-joystick-to-flysky\
           "@ | Set-Content -Path (Join-Path $packageDir "START-HERE.txt") -Encoding UTF8
