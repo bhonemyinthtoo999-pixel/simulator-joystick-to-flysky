@@ -42,7 +42,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from .icon_resources import application_icon
 from .ui.main_window_polished import MainWindow
 
-APP_VERSION = "0.8.6"
+APP_VERSION = "0.8.7"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "selectable-color-themes-3d-transmitter-green-joystick-switches-responsive-bilingual-product-ui",
+        "wide-settings-scroll-free-mapping-maha-bmh-about-selectable-themes-3d-transmitter",
     )
 
     def show_unhandled_exception(
