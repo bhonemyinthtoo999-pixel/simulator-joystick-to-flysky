@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QBoxLayout, QFrame, QGridLayout, QLayout, QScrollArea, QWidget
+from PySide6.QtWidgets import QBoxLayout, QLayout, QScrollArea, QWidget
 
 from ..services.localization_service import apply_widget_language, normalize_language
 from ..services.readiness_service import ReadinessReport
@@ -47,8 +47,6 @@ class DashboardPage(_BaseDashboardPage):
     def set_language(self, language: object) -> None:
         self._language = normalize_language(language)
         apply_widget_language(self, self._language)
-        if hasattr(self.transmitter_monitor, "set_language"):
-            self.transmitter_monitor.set_language(self._language)
         kind, board, connection = self._last_adapter_state
         self.set_adapter_state(kind, board=board, connection=connection)
 
@@ -66,6 +64,26 @@ class DashboardPage(_BaseDashboardPage):
         self._last_adapter_state = (kind, board, connection)
         super().set_adapter_state(kind, board=board, connection=connection)
         apply_widget_language(self, self._language)
+
+    def update_transmitter(
+        self,
+        channels: list[int],
+        *,
+        adapter_kind: str,
+        connection: str,
+        streaming: bool,
+        failsafe: bool,
+    ) -> None:
+        super().update_transmitter(
+            channels,
+            adapter_kind=adapter_kind,
+            connection=connection,
+            streaming=streaming,
+            failsafe=failsafe,
+        )
+        # This section has only a few widgets, so translating after its UI-rate
+        # update is inexpensive and keeps dynamic LIVE/FAILSAFE text bilingual.
+        apply_widget_language(self.transmitter_monitor, self._language)
 
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
