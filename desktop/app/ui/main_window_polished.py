@@ -5,7 +5,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .main_window_localized import MainWindow as _LocalizedMainWindow
-from .theme_presets import DynamicProductThemeController
+from .theme_presets import DynamicProductThemeController, normalize_theme
 
 
 class MainWindow(_LocalizedMainWindow):
@@ -78,10 +78,18 @@ class MainWindow(_LocalizedMainWindow):
             QTimer.singleShot(0, self._polish_visible_ui)
 
     def _save_settings(self, payload: dict[str, object]) -> None:
+        requested_theme = normalize_theme(
+            payload.get("color_theme", getattr(self.settings, "color_theme", "aurora"))
+        )
         super()._save_settings(payload)
+        self.settings.color_theme = requested_theme
+        try:
+            self.settings_store.save(self.settings)
+        except OSError:
+            pass
         controller = self._theme_controller
         if controller is not None:
-            controller.apply_theme(getattr(self.settings, "color_theme", "aurora"))
+            controller.apply_theme(requested_theme)
             self._apply_shell_accents()
             self._polish_brand()
             self._polish_visible_ui()
