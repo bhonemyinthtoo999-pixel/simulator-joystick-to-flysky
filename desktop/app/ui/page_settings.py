@@ -6,14 +6,21 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QGridLayout,
+    QFormLayout,
+    QFrame,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from ..services.localization_service import (
+    SUPPORTED_LANGUAGES,
+    apply_widget_language,
+    normalize_language,
+)
 from ..services.settings_service import AppSettings
 from .page_common import page_title
 
@@ -23,14 +30,41 @@ class SettingsPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
-        outer.setSpacing(12)
-        outer.addWidget(page_title("Settings"))
+        self._language = "en"
 
-        form = QGridLayout()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+        layout.addWidget(page_title("Settings"))
+
+        intro = QLabel(
+            "Choose the app language and tune the realtime control path. Language changes apply immediately after saving."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: palette(mid);")
+        layout.addWidget(intro)
+
+        form_card = QFrame()
+        form_card.setFrameShape(QFrame.Shape.StyledPanel)
+        form_layout = QVBoxLayout(form_card)
+        form_layout.setContentsMargins(18, 16, 18, 16)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setHorizontalSpacing(18)
-        form.setVerticalSpacing(10)
+        form.setVerticalSpacing(12)
+
+        self.language = QComboBox()
+        for code, label in SUPPORTED_LANGUAGES:
+            self.language.addItem(label, code)
+
         self.demo = QCheckBox("Enable built-in Demo Flight Joystick")
         self.low_latency = QCheckBox(
             "Low-latency flight output (recommended for FlySky trainer control)"
@@ -68,23 +102,22 @@ class SettingsPage(QWidget):
         self.log_level = QComboBox()
         self.log_level.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
 
-        form.addWidget(self.demo, 0, 0, 1, 2)
-        form.addWidget(self.low_latency, 1, 0, 1, 2)
-        form.addWidget(QLabel("Realtime output limit"), 2, 0)
-        form.addWidget(self.realtime_rate, 2, 1)
-        form.addWidget(QLabel("UI refresh rate"), 3, 0)
-        form.addWidget(self.rate, 3, 1)
-        form.addWidget(QLabel("Default serial baud"), 4, 0)
-        form.addWidget(self.baud, 4, 1)
-        form.addWidget(self.auto_detect_adapter, 5, 0, 1, 2)
-        form.addWidget(self.auto_connect, 6, 0, 1, 2)
-        form.addWidget(QLabel("Diagnostics level"), 7, 0)
-        form.addWidget(self.log_level, 7, 1)
-        outer.addLayout(form)
+        form.addRow("Language", self.language)
+        form.addRow(self.demo)
+        form.addRow(self.low_latency)
+        form.addRow("Realtime output limit", self.realtime_rate)
+        form.addRow("UI refresh rate", self.rate)
+        form.addRow("Default serial baud", self.baud)
+        form.addRow(self.auto_detect_adapter)
+        form.addRow(self.auto_connect)
+        form.addRow("Diagnostics level", self.log_level)
+        form_layout.addLayout(form)
+        layout.addWidget(form_card)
 
         save = QPushButton("Save settings")
+        save.setMinimumHeight(40)
         save.clicked.connect(self._save)
-        outer.addWidget(save)
+        layout.addWidget(save)
 
         note = QLabel(
             "Low-latency mode separates the realtime joystick-to-Arduino path from heavy dashboard and mapping UI updates. "
@@ -92,8 +125,15 @@ class SettingsPage(QWidget):
         )
         note.setWordWrap(True)
         note.setStyleSheet("font-size: 11px; color: palette(mid);")
-        outer.addWidget(note)
-        outer.addStretch(1)
+        layout.addWidget(note)
+        layout.addStretch(1)
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+    def set_language(self, language: object) -> None:
+        self._language = normalize_language(language)
+        apply_widget_language(self, self._language)
 
     def set_settings(self, settings: AppSettings) -> None:
         self.demo.setChecked(settings.demo_joystick_enabled)
@@ -106,6 +146,10 @@ class SettingsPage(QWidget):
         self.auto_detect_adapter.setChecked(settings.auto_detect_adapter)
         self.auto_connect.setChecked(settings.auto_connect)
         self.log_level.setCurrentText(settings.log_level)
+        language_index = self.language.findData(normalize_language(settings.language))
+        if language_index >= 0:
+            self.language.setCurrentIndex(language_index)
+        self.set_language(settings.language)
 
     def _save(self) -> None:
         payload: dict[str, Any] = {
@@ -117,5 +161,6 @@ class SettingsPage(QWidget):
             "auto_detect_adapter": self.auto_detect_adapter.isChecked(),
             "auto_connect": self.auto_connect.isChecked(),
             "log_level": self.log_level.currentText(),
+            "language": str(self.language.currentData() or "en"),
         }
         self.save_requested.emit(payload)
