@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .main_window_localized import MainWindow as _LocalizedMainWindow
@@ -8,7 +9,7 @@ from .product_theme import ProductThemeController
 
 
 class MainWindow(_LocalizedMainWindow):
-    """Final product shell with colorful raised controls and card depth."""
+    """Final product shell with colorful raised controls and polished typography."""
 
     def __init__(self) -> None:
         self._theme_controller: ProductThemeController | None = None
@@ -17,6 +18,7 @@ class MainWindow(_LocalizedMainWindow):
         if app is not None:
             self._theme_controller = ProductThemeController(app, self)
         self._apply_shell_accents()
+        self._polish_brand()
         self.navigation.currentRowChanged.connect(
             lambda _row: QTimer.singleShot(0, self._polish_visible_ui)
         )
@@ -35,13 +37,54 @@ class MainWindow(_LocalizedMainWindow):
             f"stop:0 {start}, stop:0.52 {middle}, stop:1 {end}); }}"
         )
 
+    def _polish_brand(self) -> None:
+        if not hasattr(self, "navigation_brand"):
+            return
+        self.navigation_brand.setText("Simulator Joystick → FlySky")
+        self.navigation_brand.setWordWrap(False)
+        self.navigation_brand.setToolTip("Simulator Joystick to FlySky")
+        self.navigation_brand.setStyleSheet(
+            "font-size: 13px; font-weight: 800; color: #ffffff;"
+        )
+
+    def _apply_application_font(self, language: str) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        available = set(QFontDatabase.families())
+        if language == "my":
+            candidates = (
+                "Noto Sans Myanmar",
+                "Myanmar Text",
+                "Pyidaungsu",
+                "Padauk",
+                "Segoe UI",
+            )
+        else:
+            candidates = ("Segoe UI", app.font().family())
+        family = next((name for name in candidates if name in available), app.font().family())
+        font = QFont(family, 10)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        app.setFont(font)
+
     def _apply_language(self) -> None:
         super()._apply_language()
+        self._polish_brand()
         if self._theme_controller is not None:
             QTimer.singleShot(0, self._polish_visible_ui)
 
+    def _apply_responsive_layout(self) -> None:
+        super()._apply_responsive_layout()
+        if not hasattr(self, "navigation_panel"):
+            return
+        width = max(1, self.width())
+        panel_width = 170 if width < 820 else 210 if width < 1080 else 255
+        self.navigation_panel.setFixedWidth(panel_width)
+        self._polish_brand()
+
     def _refresh_visible_language(self) -> None:
         super()._refresh_visible_language()
+        self._polish_brand()
         if self._theme_controller is not None:
             self._theme_controller.polish_tree(self.pages.currentWidget())
             if self.setup_wizard.isVisible():
