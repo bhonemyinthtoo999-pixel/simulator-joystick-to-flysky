@@ -233,4 +233,7 @@ class DynamicProductThemeController(ProductThemeController):
         self.app.setStyleSheet(base + _overlay_qss(self.colors, dark=self.dark))
         self.polish_tree(self.root)
         self.root.update()
+        for widget in self.root.findChildren(QWidget):
+            widget.update()
+        self.app.processEvents()
         return self.theme_name
