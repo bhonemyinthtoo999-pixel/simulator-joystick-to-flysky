@@ -42,7 +42,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from .icon_resources import application_icon
 from .ui.main_window_polished import MainWindow
 
-APP_VERSION = "0.8.4"
+APP_VERSION = "0.8.5"
 
 
 def main() -> int:
@@ -68,7 +68,7 @@ def main() -> int:
     app.setProperty("simjoyInputBackend", INPUT_BACKEND_MODE)
     app.setProperty(
         "simjoyFeatureSet",
-        "colorful-raised-responsive-bilingual-help-validation-support",
+        "polished-settings-modern-toggles-myanmar-typography-colorful-product-ui",
     )
 
     def show_unhandled_exception(
