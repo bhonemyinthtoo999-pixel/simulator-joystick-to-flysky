@@ -17,6 +17,7 @@ class AppSettings:
     last_port: str = ""
     log_level: str = "INFO"
     language: str = "en"
+    color_theme: str = "aurora"
     setup_completed: bool = False
     setup_revision: int = 0
 
@@ -46,6 +47,25 @@ class AppSettings:
             "myanmar",
             "မြန်မာ",
         } else "en"
+        clean_theme = str(self.color_theme or "aurora").strip().casefold().replace(" ", "_")
+        aliases = {
+            "purple": "aurora",
+            "aurora_purple": "aurora",
+            "blue": "ocean",
+            "ocean_blue": "ocean",
+            "green": "emerald",
+            "emerald_green": "emerald",
+            "orange": "sunset",
+            "sunset_orange": "sunset",
+            "pink": "rose",
+            "rose_pink": "rose",
+        }
+        clean_theme = aliases.get(clean_theme, clean_theme)
+        self.color_theme = (
+            clean_theme
+            if clean_theme in {"aurora", "ocean", "emerald", "sunset", "rose"}
+            else "aurora"
+        )
         self.setup_completed = bool(self.setup_completed)
         self.setup_revision = max(0, int(self.setup_revision))
 
